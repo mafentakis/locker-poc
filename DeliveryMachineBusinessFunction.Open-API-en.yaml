@@ -1,0 +1,3784 @@
+﻿openapi: 3.1.0
+info:
+  title: DeliveryMachineBusinessFunction SSB (ITF42)
+  version: v010
+  description: "# Overview\n\nBusiness interface of the PS Fusion parcel locker.\n\
+    It includes the command interface for business commands (for example, \"open a\
+    \ specific compartment\")\nand the query interface for information about the machine's\
+    \ business structure and status.\n\nThis interface is **synchronous**. All methods\
+    \ are invoked synchronously by the client\n((L)PS_Service in the data center)\
+    \ on the server (PS_Fusion parcel locker).\n\nCommand methods are **fire-and-forget**:\
+    \ they return a technical acknowledgment, but no business response.\nSome commands\
+    \ can trigger state changes that are reported asynchronously via the separate\n\
+    [DeliveryMachineBusinessEvent interface](https://dhl.atlassian.net/wiki/x/PQAoJw).\n\
+    There is no runtime dependency between this command/query interface and the event\
+    \ interface.\n\n---\n\n## Implementation Notes\n\n- Methods that define an **HTTP\
+    \ 501** response (Not Implemented) may be omitted by the manufacturer,\n  i.e.\
+    \ left unimplemented. They **must**, however, still be listed in the manufacturer-specific\n\
+    \  OpenAPI specification and marked as not implemented.\n- All other methods without\
+    \ an HTTP 501 response **must** be fully implemented.\n\n## RefList/InfoList Pattern\n\
+    \nStructural responses (for example, `getLockerConfiguration`) use a **RefList/InfoList\
+    \ pattern**\nto avoid data redundancy:\n\n1. **`*InfoList`** (for example, `compartmentInfoList`)\
+    \ - the **catalog**: one flat top-level list per type containing the **full objects**\
+    \ (single source of truth).\n   These lists exist only at the top level (for example,\
+    \ in the `LockerInfoTo` object).\n2. **`*InfoRefList`** (for example, `compartmentInfoRefList`\
+    \ inside elements of `controllerModuleInfoList`) - the **reference list**:\n \
+    \  contains only IDs that point to entries in the catalog and express membership\
+    \ in a parent object\n   (for example, which compartments belong to a standard\
+    \ module). The IDs must be understood as\n   references to exactly one object\
+    \ in the full-object catalog.\n\nIn both cases, the RefList entry **never** contains\
+    \ the full object definition.\nThat definition exists exactly once in the catalog\
+    \ (`*InfoList`).\n\nThis pattern follows the normalization principle of relational\
+    \ databases:\nthe full object definition exists exactly once in the catalog (`*InfoList`),\n\
+    while parent-child relationships are represented via ID references (`*InfoRefList`).\n\
+    \n## Device ID Assignment and Commissioning\n\nAll device identifiers (compartmentId,\
+    \ controllerModuleId, etc.) are UUIDs assigned during commissioning by the\
+    \ technician.\nThey are business-level identifiers permanently bound to a\
+    \ physical location within the locker\n(e.g., module 2, top position). If\
+    \ hardware is replaced for maintenance or repair, the recommissioning process\n\
+    reassigns the original ID to the device at the same physical location, ensuring\
+    \ a stable\nmapping regardless of underlying hardware changes."
+  contact:
+    name: Axel NÃ¶llchen (IT P&P)
+    email: axel.noellchen@deutschepost.de
+servers:
+- url: http://localhost:8090
+  description: Local development
+- url: http://{lockerHost}
+  description: 'PS Fusion locker (deployment-specific address: each machine is its
+    own server with an individual IP address or host name).'
+  variables:
+    lockerHost:
+      default: localhost:8090
+      description: IP address or host name of the PS Fusion parcel locker (for example,
+        192.168.1.100:8090)
+security:
+- mTLS: []
+tags:
+- name: Business Version Info Methods
+  description: Synchronously invoked methods for querying interface and software version
+    information.
+- name: Business Command Methods
+  description: Synchronously invoked command methods without a business-level response.
+- name: Health Query Methods
+  description: Synchronously invoked health queries for the locker and its components.
+- name: State Query Methods
+  description: Synchronously invoked state queries for the locker and its components.
+- name: Structure Query Methods
+  description: Synchronously invoked structure queries for the locker's business-logical
+    composition.
+paths:
+  /api/locker/{lockerId}/version:
+    x-unversioned: true
+    get:
+      tags:
+      - Business Version Info Methods
+      summary: Get locker version
+      operationId: getLockerVersion
+      description: (getLockerVersion) Returns the interface version information. **Note:**
+        According to the SSB, this endpoint is intentionally not versioned; the path
+        does not contain a {version} segment.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LockerVersionTo'
+              example:
+                lockerId: f47ac10b-58cc-4372-a567-0e02b2c3d479
+                version: 1.0.0
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_LOCKER_ID
+                message: Path parameter 'lockerId' is not a valid UUID.
+                timestamp: '2026-03-06T12:25:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: VERSION_READ_ERROR
+                message: Failed to read the locker version information due to an internal
+                  error.
+                timestamp: '2026-03-06T12:25:01Z'
+        '501':
+          description: Not Implemented â€” the getLockerVersion operation is not supported
+            by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getLockerVersion' is not implemented on this locker.
+                timestamp: '2026-03-06T12:25:02Z'
+  /api/{version}/locker/{lockerId}/exclusive-lock/acquire:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    post:
+      tags:
+      - Business Command Methods
+      summary: Acquire exclusive lock
+      operationId: acquireLockerExclusiveLock
+      description: (acquireLockerExclusiveLock) This command allows the caller to
+        request exclusive control of the machine. If no other caller currently holds
+        exclusive control, it is granted to the caller. In that case, the caller can
+        control the machine exclusively. After completing its work, the caller must
+        release exclusive control using the corresponding method. If exclusive control
+        is already held by another caller, this is indicated in the response. The
+        caller then cannot use the machine and must try again later. Exclusive control
+        is granted for a configurable period and expires automatically afterwards.
+        When that happens, exclusive control is withdrawn automatically. The caller
+        may use the corresponding method to extend exclusive control.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: acquireLockerDuration
+        in: query
+        required: true
+        description: Requested lock duration in ISO 8601 duration format.
+        schema:
+          type: string
+          format: duration
+          example: PT30M
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LockExclusiveHandleTo'
+              example: gy12p6N1UC4WJp4H1tFhVqtlzgm7qYp4qVnq5p/PLu4=
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_DURATION_FORMAT
+                message: Query parameter 'acquireLockerDuration' has invalid ISO 8601
+                  duration format.
+                timestamp: '2026-03-06T10:55:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: LOCK_ACQUIRE_FAILED
+                message: Failed to acquire exclusive lock â€” another lock is already
+                  active.
+                timestamp: '2026-03-06T10:55:01Z'
+        '423':
+          description: '423 Locked: LockExclusiveHandleBlockedException; the exclusive
+            lock cannot be acquired because another active lock is already held.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: LOCK_EXCLUSIVE_HANDLE_BLOCKED
+                message: Exclusive lock cannot be acquired because another active
+                  lock is already held.
+                timestamp: '2026-03-09T09:55:02Z'
+  /api/{version}/locker/{lockerId}/exclusive-lock/release:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    post:
+      tags:
+      - Business Command Methods
+      summary: Release exclusive lock
+      operationId: releaseLockerExclusiveLock
+      description: (releaseLockerExclusiveLock) This command allows the caller to
+        release exclusive control of the machine. If an invalid exclusive-control
+        handle is provided, the command is not executed and a corresponding exception
+        is returned. If the release has already happened, the command is ignored and
+        recorded in the log.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - $ref: '#/components/parameters/LockToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_LOCK_TOKEN
+                message: Header 'Lock-Token' does not match any active exclusive lock.
+                timestamp: '2026-03-06T10:45:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: LOCK_RELEASE_FAILED
+                message: Failed to release exclusive lock due to an internal error.
+                timestamp: '2026-03-06T10:45:01Z'
+        '409':
+          description: '409 Conflict: LockExclusiveHandleUnlockException; the exclusive
+            lock cannot be released because the active lock state conflicts with the
+            supplied handle.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: LOCK_EXCLUSIVE_HANDLE_UNLOCK_BLOCKED
+                message: Exclusive lock cannot be released because another process
+                  owns the active lock and the supplied handle is no longer current.
+                timestamp: '2026-03-09T09:45:02Z'
+  /api/{version}/locker/{lockerId}/exclusive-lock/extend:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    post:
+      tags:
+      - Business Command Methods
+      summary: Extend exclusive lock
+      operationId: extendLockerExclusiveLock
+      description: (extendLockerExclusiveLock) This command allows the caller to extend
+        exclusive control of the machine. If the caller currently holds exclusive
+        control of the machine, it is extended by the specified duration and returned
+        to the caller. In that case, the caller can continue to control the machine
+        exclusively. After completing its work, the caller must release exclusive
+        control using the corresponding method. If exclusive control is already held
+        by another caller, this is indicated in the response. The caller then cannot
+        use the machine and must try again later.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - $ref: '#/components/parameters/LockToken'
+      - name: acquireLockerDuration
+        in: query
+        required: true
+        description: Requested extension duration in ISO 8601 duration format.
+        schema:
+          type: string
+          format: duration
+          example: PT30M
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LockExclusiveHandleTo'
+              example: gy12p6N1UC4WJp4H1tFhVqtlzgm7qYp4qVnq5p/PLu4=
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_LOCK_TOKEN
+                message: Header 'Lock-Token' does not match any active exclusive lock.
+                timestamp: '2026-03-06T10:50:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: LOCK_EXTEND_FAILED
+                message: Failed to extend exclusive lock due to an internal error.
+                timestamp: '2026-03-06T10:50:01Z'
+        '423':
+          description: '423 Locked: LockExclusiveHandleBlockedException; the exclusive
+            lock cannot be extended because another active lock is already held.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: LOCK_EXCLUSIVE_HANDLE_BLOCKED
+                message: Exclusive lock cannot be extended because another active
+                  lock is already held.
+                timestamp: '2026-03-09T09:50:02Z'
+  /api/{version}/locker/{lockerId}/exclusive-lock/query:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - Business Command Methods
+      summary: Query exclusive lock
+      operationId: checkIsLockerExclusiveLockSet
+      description: (checkIsLockerExclusiveLockSet) Allows the caller to check whether
+        exclusive control has already been assigned. If it has been assigned, TRUE
+        is returned; otherwise, FALSE is returned.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: boolean
+              example: false
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_LOCKER_ID
+                message: Path parameter 'lockerId' is not a valid UUID.
+                timestamp: '2026-03-06T11:55:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: LOCK_QUERY_FAILED
+                message: Failed to query exclusive lock status due to an internal
+                  error.
+                timestamp: '2026-03-06T11:55:01Z'
+        '501':
+          description: Not Implemented â€” the checkIsLockerExclusiveLockSet operation
+            is not supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'checkIsLockerExclusiveLockSet' is not implemented
+                  on this locker.
+                timestamp: '2026-03-06T11:55:02Z'
+  /api/{version}/locker/{lockerId}/wakeup:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    post:
+      tags:
+      - Business Command Methods
+      summary: Wake up locker
+      operationId: wakeupLocker
+      description: (wakeupLocker) This command wakes the machine from power-saving
+        mode.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_LOCKER_ID
+                message: Path parameter 'lockerId' is not a valid UUID.
+                timestamp: '2026-03-06T10:15:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: WAKEUP_FAILED
+                message: Failed to wake up the locker due to an internal hardware
+                  communication error.
+                timestamp: '2026-03-06T10:15:01Z'
+        '501':
+          description: Not Implemented â€” the wakeupLocker operation is not supported
+            by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'wakeupLocker' is not implemented on this locker.
+                timestamp: '2026-03-06T10:15:02Z'
+  /api/{version}/locker/{lockerId}/sleep:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    post:
+      tags:
+      - Business Command Methods
+      summary: Put locker to sleep
+      operationId: sleepLocker
+      description: (sleepLocker) This command puts the machine into power-saving mode.
+        It is executed only if no exclusive control of the machine is currently active.
+        Otherwise, the command is ignored and recorded in the log.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_LOCKER_ID
+                message: Path parameter 'lockerId' is not a valid UUID.
+                timestamp: '2026-03-06T10:30:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: SLEEP_FAILED
+                message: Failed to put the locker into sleep mode due to an active
+                  exclusive lock.
+                timestamp: '2026-03-06T10:30:01Z'
+        '501':
+          description: Not Implemented â€” the sleepLocker operation is not supported
+            by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'sleepLocker' is not implemented on this locker.
+                timestamp: '2026-03-06T10:30:02Z'
+  /api/{version}/locker/{lockerId}/touchscreen/{touchscreenId}/on:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    post:
+      tags:
+      - Business Command Methods
+      summary: Switch touchscreen on
+      operationId: switchOnTouchscreen
+      description: (switchOnTouchscreen) This command switches on the specified screen
+        on the machine. If no exclusive-control token is provided, the API checks
+        whether no active exclusive control is currently held. In that case, the touchscreen
+        is switched on. If exclusive control exists, the command is ignored.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: touchscreenId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/TouchscreenIdTo'
+      - $ref: '#/components/parameters/LockTokenOptional'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_TOUCHSCREEN_ID
+                message: Path parameter 'touchscreenId' is not a valid UUID.
+                timestamp: '2026-03-06T10:20:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: TOUCHSCREEN_COMMUNICATION_ERROR
+                message: Failed to switch on touchscreen 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+                  due to an internal hardware error.
+                timestamp: '2026-03-06T10:20:01Z'
+        '501':
+          description: Not Implemented â€” the switchOnTouchscreen operation is not
+            supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'switchOnTouchscreen' is not implemented on this
+                  locker.
+                timestamp: '2026-03-06T10:20:02Z'
+  /api/{version}/locker/{lockerId}/touchscreen/{touchscreenId}/off:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    post:
+      tags:
+      - Business Command Methods
+      summary: Switch touchscreen off
+      operationId: switchOffTouchscreen
+      description: (switchOffTouchscreen) This command switches off the specified
+        screen on the machine. If no exclusive-control token is provided, the API
+        checks whether no active exclusive control is currently held. In that case,
+        the touchscreen is switched off. If exclusive control exists, the command
+        is ignored.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: touchscreenId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/TouchscreenIdTo'
+      - $ref: '#/components/parameters/LockTokenOptional'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_TOUCHSCREEN_ID
+                message: Path parameter 'touchscreenId' is not a valid UUID.
+                timestamp: '2026-03-06T10:25:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: TOUCHSCREEN_COMMUNICATION_ERROR
+                message: Failed to switch off touchscreen 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+                  due to an internal hardware error.
+                timestamp: '2026-03-06T10:25:01Z'
+        '501':
+          description: Not Implemented â€” the switchOffTouchscreen operation is not
+            supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'switchOffTouchscreen' is not implemented on this
+                  locker.
+                timestamp: '2026-03-06T10:25:02Z'
+  /api/{version}/locker/{lockerId}/code-scanner/{codeScannerId}/enable:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    post:
+      tags:
+      - Business Command Methods
+      summary: Enable code scanner
+      operationId: enableCodeScanner
+      description: (enableCodeScanner) This command switches on the specified code
+        scanner in the specified machine.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: codeScannerId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/CodeScannerIdTo'
+      - $ref: '#/components/parameters/LockToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        description: Optional request body. If provided, it restricts the scanner
+          to the specified code types. If omitted, the scanner enables all
+          supported code types.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnableCodeScannerRequestTo'
+              description: Optional request body. If provided, it restricts the scanner
+                to the specified code types. If omitted, the scanner enables all supported
+                code types.
+            examples:
+              allCodeTypes:
+                summary: a) No body - scanner enables all supported code types
+                value: null
+              focusedCodeTypes:
+                summary: b) Focused on 5 code types (QR, CODE128, EAN13, EAN8, CODE_DATA_MATRIX)
+                value:
+                  codeTypes:
+                  - QR
+                  - CODE128
+                  - EAN13
+                  - EAN8
+                  - CODE_DATA_MATRIX
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              examples:
+                invalidCodeScannerId:
+                  summary: Invalid codeScannerId
+                  value:
+                    errorCode: INVALID_CODE_SCANNER_ID
+                    message: Path parameter 'codeScannerId' is not a valid UUID.
+                    timestamp: '2026-03-06T11:15:00Z'
+                invalidCodeType:
+                  summary: Unknown value in codeTypes list
+                  value:
+                    errorCode: INVALID_CODE_TYPE
+                    message: 'Request body contains an unknown code type: ''UNKNOWN_CODE''.'
+                    timestamp: '2026-03-06T11:15:01Z'
+                emptyCodeTypesList:
+                  summary: codeTypes list is empty
+                  value:
+                    errorCode: INVALID_REQUEST_BODY
+                    message: Request body field 'codeTypes' must not be empty.
+                    timestamp: '2026-03-06T11:15:02Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: CODE_SCANNER_ENABLE_FAILED
+                message: Failed to enable code scanner 'e5f6a7b8-c9d0-1234-efab-345678901234'
+                  due to an internal hardware error.
+                timestamp: '2026-03-06T11:15:03Z'
+        '422':
+          description: Unprocessable Entity â€” the Lock-Token is invalid, expired,
+            or belongs to a different locker (LockExclusiveHandleLockException).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: LOCK_EXCLUSIVE_HANDLE_LOCK
+                message: The provided Lock-Token is invalid or expired.
+                timestamp: '2026-03-06T11:15:04Z'
+  /api/{version}/locker/{lockerId}/code-scanner/{codeScannerId}/disable:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    post:
+      tags:
+      - Business Command Methods
+      summary: Disable code scanner
+      operationId: disableCodeScanner
+      description: (disableCodeScanner) This command switches off the specified code
+        scanner in the specified machine.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: codeScannerId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/CodeScannerIdTo'
+      - $ref: '#/components/parameters/LockToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_CODE_SCANNER_ID
+                message: Path parameter 'codeScannerId' is not a valid UUID.
+                timestamp: '2026-03-06T11:20:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: CODE_SCANNER_DISABLE_FAILED
+                message: Failed to disable code scanner 'e5f6a7b8-c9d0-1234-efab-345678901234'
+                  due to an internal hardware error.
+                timestamp: '2026-03-06T11:20:01Z'
+        '422':
+          description: Unprocessable Entity â€” the Lock-Token is invalid, expired,
+            or belongs to a different locker (LockExclusiveHandleLockException).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: LOCK_EXCLUSIVE_HANDLE_LOCK
+                message: The provided Lock-Token is invalid or expired.
+                timestamp: '2026-03-06T11:20:02Z'
+  /api/{version}/locker/{lockerId}/audio-speaker/{audioSpeakerId}/output:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    post:
+      tags:
+      - Business Command Methods
+      summary: Audio output control
+      operationId: doOutputAudioSpeaker
+      description: (doOutputAudioSpeaker) This command outputs an acoustic signal
+        on the specified audio device of the machine. The provided audio parameters
+        are applied.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: audioSpeakerId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/AudioSpeakerIdTo'
+      - $ref: '#/components/parameters/LockToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AudioSignalTo'
+            example:
+              audioData: UklGRiQAAABXQVZFZm10IBAAAAABAAEA
+              audioCoding: MP3
+              volume: 75
+              duration: PT5S
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: PARAMETER_MISSING
+                message: Required request body is missing or contains invalid audioSignal
+                  data.
+                timestamp: '2026-03-06T11:25:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: AUDIO_OUTPUT_FAILED
+                message: Failed to output audio on speaker 'f6a7b8c9-d0e1-2345-fabc-456789012345'
+                  due to an internal hardware error.
+                timestamp: '2026-03-06T11:25:01Z'
+        '501':
+          description: Not Implemented â€” the doOutputAudioSpeaker operation is not
+            supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'doOutputAudioSpeaker' is not implemented on this
+                  locker.
+                timestamp: '2026-03-06T11:25:02Z'
+        '422':
+          description: Unprocessable Entity â€” the Lock-Token is invalid, expired,
+            or belongs to a different locker (LockExclusiveHandleLockException).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: LOCK_EXCLUSIVE_HANDLE_LOCK
+                message: The provided Lock-Token is invalid or expired.
+                timestamp: '2026-03-06T11:25:03Z'
+  /api/{version}/locker/{lockerId}/lighting-unit/{lightingUnitId}/on:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    post:
+      tags:
+      - Business Command Methods
+      summary: Switch light on
+      operationId: switchOnLightUnit
+      description: (switchOnLightUnit) This command switches on the light on the machine's
+        lighting unit. The provided light-control parameters are applied.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: lightingUnitId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/LightingUnitIdTo'
+      - $ref: '#/components/parameters/LockToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LightParameterTo'
+            example:
+              brightness: 80
+              lightColor: 16777215
+              lightTemperature: 4000
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: PARAMETER_MISSING
+                message: Required request body is missing or invalid.
+                timestamp: '2026-03-06T10:35:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: LIGHTING_UNIT_ERROR
+                message: Failed to switch on lighting unit 'c3d4e5f6-a7b8-9012-cdef-123456789012'
+                  due to an internal hardware error.
+                timestamp: '2026-03-06T10:35:01Z'
+        '501':
+          description: Not Implemented â€” the switchOnLightUnit operation is not supported
+            by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'switchOnLightUnit' is not implemented on this
+                  locker.
+                timestamp: '2026-03-06T10:35:02Z'
+        '422':
+          description: Unprocessable Entity â€” the Lock-Token is invalid, expired,
+            or belongs to a different locker (LockExclusiveHandleLockException).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: LOCK_EXCLUSIVE_HANDLE_LOCK
+                message: The provided Lock-Token is invalid or expired.
+                timestamp: '2026-03-06T10:35:03Z'
+  /api/{version}/locker/{lockerId}/lighting-unit/{lightingUnitId}/off:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    post:
+      tags:
+      - Business Command Methods
+      summary: Switch light off
+      operationId: switchOffLightUnit
+      description: (switchOffLightUnit) This command switches off the light on the
+        machine's lighting unit. The provided light-control parameters are applied.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: lightingUnitId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/LightingUnitIdTo'
+      - $ref: '#/components/parameters/LockToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_LIGHTING_UNIT_ID
+                message: Path parameter 'lightingUnitId' is not a valid UUID.
+                timestamp: '2026-03-06T10:40:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: LIGHTING_UNIT_ERROR
+                message: Failed to switch off lighting unit 'c3d4e5f6-a7b8-9012-cdef-123456789012'
+                  due to an internal hardware error.
+                timestamp: '2026-03-06T10:40:01Z'
+        '501':
+          description: Not Implemented â€” the switchOffLightUnit operation is not supported
+            by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'switchOffLightUnit' is not implemented on this
+                  locker.
+                timestamp: '2026-03-06T10:40:02Z'
+        '422':
+          description: Unprocessable Entity â€” the Lock-Token is invalid, expired,
+            or belongs to a different locker (LockExclusiveHandleLockException).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: LOCK_EXCLUSIVE_HANDLE_LOCK
+                message: The provided Lock-Token is invalid or expired.
+                timestamp: '2026-03-06T10:40:03Z'
+  /api/{version}/locker/{lockerId}/compartment/{compartmentId}/open:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    post:
+      tags:
+      - Business Command Methods
+      summary: Open compartment
+      operationId: openCompartment
+      description: (openCompartment) This command opens the specified compartment
+        in the specified machine.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: compartmentId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/CompartmentIdTo'
+      - $ref: '#/components/parameters/LockToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_COMPARTMENT_ID
+                message: Path parameter 'compartmentId' is not a valid UUID.
+                timestamp: '2026-03-06T11:00:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: COMPARTMENT_OPEN_FAILED
+                message: Failed to open compartment 'd4e5f6a7-b8c9-0123-defa-234567890123'
+                  due to a mechanical error.
+                timestamp: '2026-03-06T11:00:01Z'
+        '501':
+          description: Not Implemented â€” the openCompartment operation is not supported
+            by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'openCompartment' is not implemented on this locker.
+                timestamp: '2026-03-06T11:00:02Z'
+        '422':
+          description: Unprocessable Entity â€” the Lock-Token is invalid, expired,
+            or belongs to a different locker (LockExclusiveHandleLockException).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: LOCK_EXCLUSIVE_HANDLE_LOCK
+                message: The provided Lock-Token is invalid or expired.
+                timestamp: '2026-03-06T11:00:03Z'
+  /api/{version}/locker/{lockerId}/compartment/open-list:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    post:
+      tags:
+      - Business Command Methods
+      summary: Open multiple compartments
+      operationId: openCompartmentList
+      description: (openCompartmentList) This command opens all compartments listed
+        in the parameter list in the specified machine.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - $ref: '#/components/parameters/LockToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/CompartmentIdTo'
+            example:
+            - compartmentInfo@d4e5f6a7-b8c9-0123-defa-234567890123
+            - compartmentInfo@11111111-2222-3333-4444-555555555555
+            - compartmentInfo@aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+        required: true
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_REQUEST_BODY
+                message: 'Request body contains an invalid compartment ID at index
+                  1: ''not-a-uuid''.'
+                timestamp: '2026-03-06T11:10:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: COMPARTMENT_OPEN_LIST_FAILED
+                message: Failed to open one or more compartments due to an internal
+                  hardware error.
+                timestamp: '2026-03-06T11:10:01Z'
+        '501':
+          description: Not Implemented â€” the openCompartmentList operation is not
+            supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'openCompartmentList' is not implemented on this
+                  locker.
+                timestamp: '2026-03-06T11:10:02Z'
+        '422':
+          description: Unprocessable Entity â€” the Lock-Token is invalid, expired,
+            or belongs to a different locker (LockExclusiveHandleLockException).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: LOCK_EXCLUSIVE_HANDLE_LOCK
+                message: The provided Lock-Token is invalid or expired.
+                timestamp: '2026-03-06T11:10:03Z'
+  /api/{version}/locker/{lockerId}/compartment/{compartmentId}/close:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    post:
+      tags:
+      - Business Command Methods
+      summary: Close compartment
+      operationId: closeCompartment
+      description: (closeCompartment) This command closes the specified compartment
+        in the specified machine. It is supported only by machines that are able to
+        close compartments.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: compartmentId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/CompartmentIdTo'
+      - $ref: '#/components/parameters/LockToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_COMPARTMENT_ID
+                message: Path parameter 'compartmentId' is not a valid UUID.
+                timestamp: '2026-03-06T11:05:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: COMPARTMENT_CLOSE_FAILED
+                message: Failed to close compartment 'd4e5f6a7-b8c9-0123-defa-234567890123'
+                  due to a mechanical error.
+                timestamp: '2026-03-06T11:05:01Z'
+        '501':
+          description: Not Implemented â€” the closeCompartment operation is not supported
+            by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'closeCompartment' is not implemented on this locker.
+                timestamp: '2026-03-06T11:05:02Z'
+        '422':
+          description: Unprocessable Entity â€” the Lock-Token is invalid, expired,
+            or belongs to a different locker (LockExclusiveHandleLockException).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: LOCK_EXCLUSIVE_HANDLE_LOCK
+                message: The provided Lock-Token is invalid or expired.
+                timestamp: '2026-03-06T11:05:03Z'
+  /api/{version}/locker/{lockerId}/health:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - Health Query Methods
+      summary: Get locker health
+      operationId: getLockerHealth
+      description: (getLockerHealth) Returns the health status of the locker to the
+        caller.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LockerLogicalHealthTo'
+              example:
+                lockerId: f47ac10b-58cc-4372-a567-0e02b2c3d479
+                healthStatus: OK_GREEN
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_LOCKER_ID
+                message: Path parameter 'lockerId' is not a valid UUID.
+                timestamp: '2026-03-06T12:30:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: HEALTH_READ_ERROR
+                message: Failed to read the locker health status due to an internal
+                  error.
+                timestamp: '2026-03-06T12:30:01Z'
+        '501':
+          description: Not Implemented â€” the getLockerHealth operation is not supported
+            by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getLockerHealth' is not implemented on this locker.
+                timestamp: '2026-03-06T12:30:02Z'
+  /api/{version}/locker/{lockerId}/health/overall:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - Health Query Methods
+      summary: Get locker overall health
+      operationId: getLockerOverallHealth
+      description: (getLockerOverallHealth) Returns the health status of the locker
+        together with all its devices to the caller.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LockerLogicalOverallHealthTo'
+              example:
+                lockerId: f47ac10b-58cc-4372-a567-0e02b2c3d479
+                healthStatus: OK_GREEN
+                controllerModuleHealthList:
+                - controllerModuleId: controllerModuleInfo@c9d0e1f2-a3b4-5678-cdef-789012345678
+                  healthStatus: OK_GREEN
+                standardModuleHealthList:
+                - standardModuleId: standardModuleInfo@b8c9d0e1-f2a3-4567-bcde-678901234567
+                  healthStatus: OK_GREEN
+                touchScreenHealthList:
+                - touchscreenId: touchscreenInfo@a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                  healthStatus: OK_GREEN
+                codeScannerHealthList:
+                - codeScannerId: codeScannerInfo@e5f6a7b8-c9d0-1234-efab-345678901234
+                  healthStatus: OK_GREEN
+                proximitySensorHealthList:
+                - proximitySensorId: proximitySensorInfo@b2c3d4e5-f6a7-8901-bcde-f12345678901
+                  healthStatus: OK_GREEN
+                wakeupButtonHealthList:
+                - wakeupButtonId: wakeupButtonInfo@a7b8c9d0-e1f2-3456-abcd-567890123456
+                  healthStatus: OK_GREEN
+                audioSpeakerHealthList:
+                - audioSpeakerId: audioSpeakerInfo@f6a7b8c9-d0e1-2345-fabc-456789012345
+                  healthStatus: OK_GREEN
+                lightingUnitHealthList:
+                - lightingUnitId: lightingUnitInfo@c3d4e5f6-a7b8-9012-cdef-123456789012
+                  healthStatus: OK_GREEN
+                - lightingUnitId: lightingUnitInfo@d4a5b6c7-e8f9-0123-abcd-456789abcdef
+                  healthStatus: OK_GREEN
+                compartmentHealthList:
+                - compartmentId: compartmentInfo@d4e5f6a7-b8c9-0123-defa-234567890123
+                  healthStatus: OK_GREEN
+                - compartmentId: compartmentInfo@11111111-2222-3333-4444-555555555555
+                  healthStatus: OK_GREEN
+                - compartmentId: compartmentInfo@aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+                  healthStatus: PART_OK_YELLOW
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_LOCKER_ID
+                message: Path parameter 'lockerId' is not a valid UUID.
+                timestamp: '2026-03-06T12:35:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: OVERALL_HEALTH_READ_ERROR
+                message: Failed to read the locker overall health status due to an
+                  internal error.
+                timestamp: '2026-03-06T12:35:01Z'
+        '501':
+          description: Not Implemented â€” the getLockerOverallHealth operation is not
+            supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getLockerOverallHealth' is not implemented on
+                  this locker.
+                timestamp: '2026-03-06T12:35:02Z'
+  /api/{version}/locker/{lockerId}/health/controller-module/{controllerModuleId}:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - Health Query Methods
+      summary: Get controller module health
+      operationId: getControllerModuleHealth
+      description: (getControllerModuleHealth) Returns the health status of the controller
+        module to the caller.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: controllerModuleId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ControllerModuleIdTo'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllerModuleLogicalHealthTo'
+              example:
+                controllerModuleId: controllerModuleInfo@c9d0e1f2-a3b4-5678-cdef-789012345678
+                healthStatus: OK_GREEN
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_CONTROLLER_MODULE_ID
+                message: Path parameter 'controllerModuleId' is not a valid UUID.
+                timestamp: '2026-03-06T12:40:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: CONTROLLER_MODULE_HEALTH_ERROR
+                message: Failed to retrieve health of controller module 'c9d0e1f2-a3b4-5678-cdef-789012345678'.
+                timestamp: '2026-03-06T12:40:01Z'
+        '501':
+          description: Not Implemented â€” the getControllerModuleHealth operation is
+            not supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getControllerModuleHealth' is not implemented
+                  on this locker.
+                timestamp: '2026-03-06T12:40:02Z'
+  /api/{version}/locker/{lockerId}/health/standard-module/{standardModuleId}:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - Health Query Methods
+      summary: Get standard module health
+      operationId: getStandardModuleHealth
+      description: (getStandardModuleHealth) Returns the health status of the standard
+        module to the caller.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: standardModuleId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/StandardModuleIdTo'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardModuleLogicalHealthTo'
+              example:
+                standardModuleId: standardModuleInfo@b8c9d0e1-f2a3-4567-bcde-678901234567
+                healthStatus: OK_GREEN
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_STANDARD_MODULE_ID
+                message: Path parameter 'standardModuleId' is not a valid UUID.
+                timestamp: '2026-03-06T12:45:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: STANDARD_MODULE_HEALTH_ERROR
+                message: Failed to retrieve health of standard module 'b8c9d0e1-f2a3-4567-bcde-678901234567'.
+                timestamp: '2026-03-06T12:45:01Z'
+        '501':
+          description: Not Implemented â€” the getStandardModuleHealth operation is
+            not supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getStandardModuleHealth' is not implemented on
+                  this locker.
+                timestamp: '2026-03-06T12:45:02Z'
+  /api/{version}/locker/{lockerId}/health/touchscreen/{touchscreenId}:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - Health Query Methods
+      summary: Get touchscreen health
+      operationId: getTouchscreenHealth
+      description: (getTouchscreenHealth) Returns the health status of the touchscreen
+        to the caller.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: touchscreenId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/TouchscreenIdTo'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TouchScreenLogicalHealthTo'
+              example:
+                touchscreenId: touchscreenInfo@a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                healthStatus: OK_GREEN
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_TOUCHSCREEN_ID
+                message: Path parameter 'touchscreenId' is not a valid UUID.
+                timestamp: '2026-03-06T12:50:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: TOUCHSCREEN_HEALTH_ERROR
+                message: Failed to retrieve health of touchscreen 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'.
+                timestamp: '2026-03-06T12:50:01Z'
+        '501':
+          description: Not Implemented â€” the getTouchscreenHealth operation is not
+            supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getTouchscreenHealth' is not implemented on this
+                  locker.
+                timestamp: '2026-03-06T12:50:02Z'
+  /api/{version}/locker/{lockerId}/health/code-scanner/{codeScannerId}:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - Health Query Methods
+      summary: Get code scanner health
+      operationId: getCodeScannerHealth
+      description: (getCodeScannerHealth) Returns the health status of the code scanner
+        to the caller.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: codeScannerId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/CodeScannerIdTo'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodeScannerLogicalHealthTo'
+              example:
+                codeScannerId: codeScannerInfo@e5f6a7b8-c9d0-1234-efab-345678901234
+                healthStatus: OK_GREEN
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_CODE_SCANNER_ID
+                message: Path parameter 'codeScannerId' is not a valid UUID.
+                timestamp: '2026-03-06T12:55:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: CODE_SCANNER_HEALTH_ERROR
+                message: Failed to retrieve health of code scanner 'e5f6a7b8-c9d0-1234-efab-345678901234'.
+                timestamp: '2026-03-06T12:55:01Z'
+        '501':
+          description: Not Implemented â€” the getCodeScannerHealth operation is not
+            supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getCodeScannerHealth' is not implemented on this
+                  locker.
+                timestamp: '2026-03-06T12:55:02Z'
+  /api/{version}/locker/{lockerId}/health/audio-speaker/{audioSpeakerId}:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - Health Query Methods
+      summary: Get audio speaker health
+      operationId: getAudioSpeakerHealth
+      description: (getAudioSpeakerHealth) Returns the health status of the audio
+        speaker to the caller.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: audioSpeakerId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/AudioSpeakerIdTo'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AudioSpeakerLogicalHealthTo'
+              example:
+                audioSpeakerId: audioSpeakerInfo@f6a7b8c9-d0e1-2345-fabc-456789012345
+                healthStatus: OK_GREEN
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_AUDIO_SPEAKER_ID
+                message: Path parameter 'audioSpeakerId' is not a valid UUID.
+                timestamp: '2026-03-06T13:00:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: AUDIO_SPEAKER_HEALTH_ERROR
+                message: Failed to retrieve health of audio speaker 'f6a7b8c9-d0e1-2345-fabc-456789012345'.
+                timestamp: '2026-03-06T13:00:01Z'
+        '501':
+          description: Not Implemented â€” the getAudioSpeakerHealth operation is not
+            supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getAudioSpeakerHealth' is not implemented on this
+                  locker.
+                timestamp: '2026-03-06T13:00:02Z'
+  /api/{version}/locker/{lockerId}/health/lighting-unit/{lightingUnitId}:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - Health Query Methods
+      summary: Get lighting unit health
+      operationId: getLightingUnitHealth
+      description: (getLightingUnitHealth) Returns the health status of the lighting
+        unit to the caller.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: lightingUnitId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/LightingUnitIdTo'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LightingUnitLogicalHealthTo'
+              example:
+                lightingUnitId: lightingUnitInfo@c3d4e5f6-a7b8-9012-cdef-123456789012
+                healthStatus: OK_GREEN
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_LIGHTING_UNIT_ID
+                message: Path parameter 'lightingUnitId' is not a valid UUID.
+                timestamp: '2026-03-06T13:05:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: LIGHTING_UNIT_HEALTH_ERROR
+                message: Failed to retrieve health of lighting unit 'c3d4e5f6-a7b8-9012-cdef-123456789012'.
+                timestamp: '2026-03-06T13:05:01Z'
+        '501':
+          description: Not Implemented â€” the getLightingUnitHealth operation is not
+            supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getLightingUnitHealth' is not implemented on this
+                  locker.
+                timestamp: '2026-03-06T13:05:02Z'
+  /api/{version}/locker/{lockerId}/health/proximity-sensor/{proximitySensorId}:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - Health Query Methods
+      summary: Get proximity sensor health
+      operationId: getProximitySensorHealth
+      description: (getProximitySensorHealth) Returns the health status of the proximity
+        sensor to the caller.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: proximitySensorId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ProximitySensorIdTo'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProximitySensorLogicalHealthTo'
+              example:
+                proximitySensorId: proximitySensorInfo@b2c3d4e5-f6a7-8901-bcde-f12345678901
+                healthStatus: OK_GREEN
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_PROXIMITY_SENSOR_ID
+                message: Path parameter 'proximitySensorId' is not a valid UUID.
+                timestamp: '2026-03-06T13:10:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: PROXIMITY_SENSOR_HEALTH_ERROR
+                message: Failed to retrieve health of proximity sensor 'b2c3d4e5-f6a7-8901-bcde-f12345678901'.
+                timestamp: '2026-03-06T13:10:01Z'
+        '501':
+          description: Not Implemented â€” the getProximitySensorHealth operation is
+            not supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getProximitySensorHealth' is not implemented on
+                  this locker.
+                timestamp: '2026-03-06T13:10:02Z'
+  /api/{version}/locker/{lockerId}/health/wakeup-button/{wakeupButtonId}:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - Health Query Methods
+      summary: Get wakeup button health
+      operationId: getWakeupButtonHealth
+      description: (getWakeupButtonHealth) Returns the health status of the wake-up
+        button to the caller.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: wakeupButtonId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/WakeupButtonIdTo'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WakeupButtonLogicalHealthTo'
+              example:
+                wakeupButtonId: wakeupButtonInfo@a7b8c9d0-e1f2-3456-abcd-567890123456
+                healthStatus: OK_GREEN
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_WAKEUP_BUTTON_ID
+                message: Path parameter 'wakeupButtonId' is not a valid UUID.
+                timestamp: '2026-03-06T13:15:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: WAKEUP_BUTTON_HEALTH_ERROR
+                message: Failed to retrieve health of wakeup button 'a7b8c9d0-e1f2-3456-abcd-567890123456'.
+                timestamp: '2026-03-06T13:15:01Z'
+        '501':
+          description: Not Implemented â€” the getWakeupButtonHealth operation is not
+            supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getWakeupButtonHealth' is not implemented on this
+                  locker.
+                timestamp: '2026-03-06T13:15:02Z'
+  /api/{version}/locker/{lockerId}/health/compartment/{compartmentId}:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - Health Query Methods
+      summary: Get compartment health
+      operationId: getCompartmentHealth
+      description: (getCompartmentHealth) Returns the health status of the compartment
+        to the caller.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: compartmentId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/CompartmentIdTo'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompartmentLogicalHealthTo'
+              example:
+                compartmentId: compartmentInfo@d4e5f6a7-b8c9-0123-defa-234567890123
+                healthStatus: OK_GREEN
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_COMPARTMENT_ID
+                message: Path parameter 'compartmentId' is not a valid UUID.
+                timestamp: '2026-03-06T13:20:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: COMPARTMENT_HEALTH_ERROR
+                message: Failed to retrieve health of compartment 'd4e5f6a7-b8c9-0123-defa-234567890123'.
+                timestamp: '2026-03-06T13:20:01Z'
+        '501':
+          description: Not Implemented â€” the getCompartmentHealth operation is not
+            supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getCompartmentHealth' is not implemented on this
+                  locker.
+                timestamp: '2026-03-06T13:20:02Z'
+  /api/{version}/locker/{lockerId}/state:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - State Query Methods
+      summary: Get locker state
+      operationId: getLockerState
+      description: (getLockerState) Returns the business state of the locker to the
+        caller.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LockerLogicalStateTo'
+              example:
+                lockerId: f47ac10b-58cc-4372-a567-0e02b2c3d479
+                lockerState: ACTIVE
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_LOCKER_ID
+                message: Path parameter 'lockerId' is not a valid UUID.
+                timestamp: '2026-03-07T10:00:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: LOCKER_STATE_ERROR
+                message: Failed to retrieve state of locker 'f47ac10b-58cc-4372-a567-0e02b2c3d479'.
+                timestamp: '2026-03-07T10:00:01Z'
+        '501':
+          description: Not Implemented â€” the getLockerState operation is not supported
+            by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getLockerState' is not implemented on this locker.
+                timestamp: '2026-03-07T10:00:02Z'
+  /api/{version}/locker/{lockerId}/state/overall:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - State Query Methods
+      summary: Get locker overall state
+      operationId: getLockerOverallState
+      description: (getLockerOverallState) Returns the business state of the locker
+        together with all its devices to the caller.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LockerLogicalOverallStateTo'
+              example:
+                lockerId: f47ac10b-58cc-4372-a567-0e02b2c3d479
+                controllerModuleStateList:
+                - controllerModuleId: controllerModuleInfo@c9d0e1f2-a3b4-5678-cdef-789012345678
+                  controllerModuleState: ACTIVE
+                standardModuleStateList:
+                - standardModuleId: standardModuleInfo@b8c9d0e1-f2a3-4567-bcde-678901234567
+                  standardModuleState: ACTIVE
+                touchScreenStateList:
+                - touchscreenId: touchscreenInfo@a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                  touchscreenState: ACTIVE
+                codeScannerStateList:
+                - codeScannerId: codeScannerInfo@e5f6a7b8-c9d0-1234-efab-345678901234
+                  codeScannerState: ACTIVE
+                proximitySensorStateList:
+                - proximitySensorId: proximitySensorInfo@b2c3d4e5-f6a7-8901-bcde-f12345678901
+                  proximitySensorState: ACTIVE
+                wakeupButtonStateList:
+                - wakeupButtonId: wakeupButtonInfo@a7b8c9d0-e1f2-3456-abcd-567890123456
+                  wakeupButtonState: ACTIVE
+                audioSpeakerStateList:
+                - audioSpeakerId: audioSpeakerInfo@f6a7b8c9-d0e1-2345-fabc-456789012345
+                  audioSpeakerState: true
+                lightingUnitStateList:
+                - lightingUnitId: lightingUnitInfo@c3d4e5f6-a7b8-9012-cdef-123456789012
+                  lightingUnitState: true
+                - lightingUnitId: lightingUnitInfo@d4a5b6c7-e8f9-0123-abcd-456789abcdef
+                  lightingUnitState: true
+                compartmentStateList:
+                - compartmentId: compartmentInfo@d4e5f6a7-b8c9-0123-defa-234567890123
+                  compartmentState: OPEN
+                - compartmentId: compartmentInfo@11111111-2222-3333-4444-555555555555
+                  compartmentState: OPEN
+                - compartmentId: compartmentInfo@aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+                  compartmentState: CLOSE
+                lockerLogicalState:
+                  lockerId: f47ac10b-58cc-4372-a567-0e02b2c3d479
+                  lockerState: ACTIVE
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_LOCKER_ID
+                message: Path parameter 'lockerId' is not a valid UUID.
+                timestamp: '2026-03-07T10:05:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: OVERALL_STATE_READ_ERROR
+                message: Failed to read the locker overall state due to an internal
+                  error.
+                timestamp: '2026-03-07T10:05:01Z'
+        '501':
+          description: Not Implemented â€” the getLockerOverallState operation is not
+            supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getLockerOverallState' is not implemented on this
+                  locker.
+                timestamp: '2026-03-07T10:05:02Z'
+  /api/{version}/locker/{lockerId}/controller-module/{controllerModuleId}:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - State Query Methods
+      summary: Get controller module state
+      operationId: getControllerModuleState
+      description: (getControllerModuleState) Returns the business state of the controller
+        module to the caller.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: controllerModuleId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ControllerModuleIdTo'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllerModuleLogicalStateTo'
+              example:
+                controllerModuleId: controllerModuleInfo@c9d0e1f2-a3b4-5678-cdef-789012345678
+                controllerModuleState: ACTIVE
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_CONTROLLER_MODULE_ID
+                message: Path parameter 'controllerModuleId' is not a valid UUID.
+                timestamp: '2026-03-06T12:00:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: CONTROLLER_MODULE_STATE_ERROR
+                message: Failed to retrieve state of controller module 'c9d0e1f2-a3b4-5678-cdef-789012345678'.
+                timestamp: '2026-03-06T12:00:01Z'
+        '501':
+          description: Not Implemented â€” the getControllerModuleState operation is
+            not supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getControllerModuleState' is not implemented on
+                  this locker.
+                timestamp: '2026-03-06T12:00:02Z'
+  /api/{version}/locker/{lockerId}/standard-module/{standardModuleId}:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - State Query Methods
+      summary: Get standard module state
+      operationId: getStandardModuleState
+      description: (getStandardModuleState) Returns the business state of the standard
+        module to the caller.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: standardModuleId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/StandardModuleIdTo'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardModuleLogicalStateTo'
+              example:
+                standardModuleId: standardModuleInfo@b8c9d0e1-f2a3-4567-bcde-678901234567
+                standardModuleState: ACTIVE
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_STANDARD_MODULE_ID
+                message: Path parameter 'standardModuleId' is not a valid UUID.
+                timestamp: '2026-03-06T11:40:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: STANDARD_MODULE_STATE_ERROR
+                message: Failed to retrieve state of standard module 'b8c9d0e1-f2a3-4567-bcde-678901234567'.
+                timestamp: '2026-03-06T11:40:01Z'
+        '501':
+          description: Not Implemented â€” the getStandardModuleState operation is not
+            supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getStandardModuleState' is not implemented on
+                  this locker.
+                timestamp: '2026-03-06T11:40:02Z'
+  /api/{version}/locker/{lockerId}/touchscreen/{touchscreenId}:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - State Query Methods
+      summary: Get touchscreen state
+      operationId: getTouchscreenState
+      description: (getTouchscreenState) Returns the business state of the touchscreen
+        to the caller.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: touchscreenId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/TouchscreenIdTo'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TouchScreenLogicalStateTo'
+              example:
+                touchscreenId: touchscreenInfo@a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                touchscreenState: ACTIVE
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_TOUCHSCREEN_ID
+                message: Path parameter 'touchscreenId' is not a valid UUID.
+                timestamp: '2026-03-06T11:35:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: TOUCHSCREEN_STATE_ERROR
+                message: Failed to retrieve state of touchscreen 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'.
+                timestamp: '2026-03-06T11:35:01Z'
+        '501':
+          description: Not Implemented â€” the getTouchscreenState operation is not
+            supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getTouchscreenState' is not implemented on this
+                  locker.
+                timestamp: '2026-03-06T11:35:02Z'
+  /api/{version}/locker/{lockerId}/code-scanner/{codeScannerId}:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - State Query Methods
+      summary: Get code scanner state
+      operationId: getCodeScannerState
+      description: (getCodeScannerState) Returns the business state of the code scanner
+        to the caller.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: codeScannerId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/CodeScannerIdTo'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodeScannerLogicalStateTo'
+              example:
+                codeScannerId: codeScannerInfo@e5f6a7b8-c9d0-1234-efab-345678901234
+                codeScannerState: ACTIVE
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_CODE_SCANNER_ID
+                message: Path parameter 'codeScannerId' is not a valid UUID.
+                timestamp: '2026-03-06T12:15:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: CODE_SCANNER_STATE_ERROR
+                message: Failed to retrieve state of code scanner 'e5f6a7b8-c9d0-1234-efab-345678901234'.
+                timestamp: '2026-03-06T12:15:01Z'
+        '501':
+          description: Not Implemented â€” the getCodeScannerState operation is not
+            supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getCodeScannerState' is not implemented on this
+                  locker.
+                timestamp: '2026-03-06T12:15:02Z'
+  /api/{version}/locker/{lockerId}/audio-speaker/{audioSpeakerId}:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - State Query Methods
+      summary: Get audio speaker state
+      operationId: getAudioSpeakerState
+      description: (getAudioSpeakerState) Returns the business state of the audio
+        speaker to the caller.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: audioSpeakerId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/AudioSpeakerIdTo'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AudioSpeakerLogicalStateTo'
+              example:
+                audioSpeakerId: audioSpeakerInfo@f6a7b8c9-d0e1-2345-fabc-456789012345
+                audioSpeakerState: true
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_AUDIO_SPEAKER_ID
+                message: Path parameter 'audioSpeakerId' is not a valid UUID.
+                timestamp: '2026-03-06T12:20:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: AUDIO_SPEAKER_STATE_ERROR
+                message: Failed to retrieve state of audio speaker 'f6a7b8c9-d0e1-2345-fabc-456789012345'.
+                timestamp: '2026-03-06T12:20:01Z'
+        '501':
+          description: Not Implemented â€” the getAudioSpeakerState operation is not
+            supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getAudioSpeakerState' is not implemented on this
+                  locker.
+                timestamp: '2026-03-06T12:20:02Z'
+  /api/{version}/locker/{lockerId}/lighting-unit/{lightingUnitId}:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - State Query Methods
+      summary: Get lighting unit state
+      operationId: getLightingUnitState
+      description: (getLightingUnitState) Returns the business state of the lighting
+        unit to the caller.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: lightingUnitId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/LightingUnitIdTo'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LightingUnitLogicalStateTo'
+              example:
+                lightingUnitId: lightingUnitInfo@c3d4e5f6-a7b8-9012-cdef-123456789012
+                lightingUnitState: true
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_LIGHTING_UNIT_ID
+                message: Path parameter 'lightingUnitId' is not a valid UUID.
+                timestamp: '2026-03-06T11:50:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: LIGHTING_UNIT_STATE_ERROR
+                message: Failed to retrieve state of lighting unit 'c3d4e5f6-a7b8-9012-cdef-123456789012'.
+                timestamp: '2026-03-06T11:50:01Z'
+        '501':
+          description: Not Implemented â€” the getLightingUnitState operation is not
+            supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getLightingUnitState' is not implemented on this
+                  locker.
+                timestamp: '2026-03-06T11:50:02Z'
+  /api/{version}/locker/{lockerId}/proximity-sensor/{proximitySensorId}:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - State Query Methods
+      summary: Get proximity sensor state
+      operationId: getProximitySensorState
+      description: (getProximitySensorState) Returns the business state of the proximity
+        sensor to the caller.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: proximitySensorId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ProximitySensorIdTo'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProximitySensorLogicalStateTo'
+              example:
+                proximitySensorId: proximitySensorInfo@b2c3d4e5-f6a7-8901-bcde-f12345678901
+                proximitySensorState: ACTIVE
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_PROXIMITY_SENSOR_ID
+                message: Path parameter 'proximitySensorId' is not a valid UUID.
+                timestamp: '2026-03-06T11:45:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: PROXIMITY_SENSOR_STATE_ERROR
+                message: Failed to retrieve state of proximity sensor 'b2c3d4e5-f6a7-8901-bcde-f12345678901'.
+                timestamp: '2026-03-06T11:45:01Z'
+        '501':
+          description: Not Implemented â€” the getProximitySensorState operation is
+            not supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getProximitySensorState' is not implemented on
+                  this locker.
+                timestamp: '2026-03-06T11:45:02Z'
+  /api/{version}/locker/{lockerId}/wakeup-button/{wakeupButtonId}:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - State Query Methods
+      summary: Get wakeup button state
+      operationId: getWakeupButtonState
+      description: (getWakeupButtonState) Returns the business state of the wake-up
+        button to the caller.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: wakeupButtonId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/WakeupButtonIdTo'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WakeupButtonLogicalStateTo'
+              example:
+                wakeupButtonId: wakeupButtonInfo@a7b8c9d0-e1f2-3456-abcd-567890123456
+                wakeupButtonState: ACTIVE
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_WAKEUP_BUTTON_ID
+                message: Path parameter 'wakeupButtonId' is not a valid UUID.
+                timestamp: '2026-03-06T11:30:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: WAKEUP_BUTTON_STATE_ERROR
+                message: Failed to retrieve state of wakeup button 'a7b8c9d0-e1f2-3456-abcd-567890123456'.
+                timestamp: '2026-03-06T11:30:01Z'
+        '501':
+          description: Not Implemented â€” the getWakeupButtonState operation is not
+            supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getWakeupButtonState' is not implemented on this
+                  locker.
+                timestamp: '2026-03-06T11:30:02Z'
+  /api/{version}/locker/{lockerId}/compartment/{compartmentId}:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - State Query Methods
+      summary: Get compartment state
+      operationId: getCompartmentState
+      description: (getCompartmentState) Returns the business state of the compartment
+        to the caller.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      - name: compartmentId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/CompartmentIdTo'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompartmentLogicalStateTo'
+              example:
+                compartmentId: compartmentInfo@d4e5f6a7-b8c9-0123-defa-234567890123
+                compartmentState: OPEN
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_COMPARTMENT_ID
+                message: Path parameter 'compartmentId' is not a valid UUID.
+                timestamp: '2026-03-06T12:10:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: COMPARTMENT_STATE_ERROR
+                message: Failed to retrieve state of compartment 'd4e5f6a7-b8c9-0123-defa-234567890123'.
+                timestamp: '2026-03-06T12:10:01Z'
+        '501':
+          description: Not Implemented â€” the getCompartmentState operation is not
+            supported by this locker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: NOT_IMPLEMENTED
+                message: Operation 'getCompartmentState' is not implemented on this
+                  locker.
+                timestamp: '2026-03-06T12:10:02Z'
+  /api/{version}/locker/{lockerId}/configuration:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    get:
+      tags:
+      - Structure Query Methods
+      summary: Get locker configuration
+      operationId: getLockerConfiguration
+      description: (getLockerConfiguration) Returns the business-logical structure
+        of the PS Fusion machine. This is the business view of the PS Fusion machines
+        structure. The response combines the machine, its components, the relationships
+        between those components, and the positions of the components within the machine.
+        The business-logical structure may differ from the technical structure. Only
+        the business-logical structure is considered here.
+      parameters:
+      - $ref: '#/components/parameters/LockerId'
+      - $ref: '#/components/parameters/ClientVersionHeader'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LockerLogicalInfoTo'
+              examples:
+                lockerConfigurationExample:
+                  summary: Example locker configuration
+                  value:
+                    lockerId: f47ac10b-58cc-4372-a567-0e02b2c3d479
+                    controllerModuleInfoList:
+                    - controllerModuleId: controllerModuleInfo@c9d0e1f2-a3b4-5678-cdef-789012345678
+                      touchScreenInfoRefList:
+                      - touchscreenInfo@a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                      codeScannerInfoRefList:
+                      - codeScannerInfo@e5f6a7b8-c9d0-1234-efab-345678901234
+                      proximitySensorInfoRefList:
+                      - proximitySensorInfo@b2c3d4e5-f6a7-8901-bcde-f12345678901
+                      wakeupButtonInfoRefList:
+                      - wakeupButtonInfo@a7b8c9d0-e1f2-3456-abcd-567890123456
+                      audioSpeakerInfoRefList:
+                      - audioSpeakerInfo@f6a7b8c9-d0e1-2345-fabc-456789012345
+                      lightingUnitInfoRefList:
+                      - lightingUnitInfo@c3d4e5f6-a7b8-9012-cdef-123456789012
+                      compartmentInfoRefList: []
+                      physicalPosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 0
+                          yCoordinate: 0
+                          zCoordinate: 0
+                        lowerRightRearCorner:
+                          xCoordinate: 500
+                          yCoordinate: 500
+                          zCoordinate: 600
+                      physicalSize: 500
+                      schemePosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 0
+                          yCoordinate: 0
+                          zCoordinate: 0
+                        lowerRightRearCorner:
+                          xCoordinate: 500
+                          yCoordinate: 500
+                          zCoordinate: 600
+                      schemeSize: 500
+                    standardModuleInfoList:
+                    - standardModuleId: standardModuleInfo@b8c9d0e1-f2a3-4567-bcde-678901234567
+                      compartmentInfoRefList:
+                      - compartmentInfo@d4e5f6a7-b8c9-0123-defa-234567890123
+                      - compartmentInfo@11111111-2222-3333-4444-555555555555
+                      - compartmentInfo@aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+                      lightingUnitInfoRefList:
+                      - lightingUnitInfo@d4a5b6c7-e8f9-0123-abcd-456789abcdef
+                      physicalPosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 0
+                          yCoordinate: 0
+                          zCoordinate: 600
+                        lowerRightRearCorner:
+                          xCoordinate: 500
+                          yCoordinate: 700
+                          zCoordinate: 1800
+                      physicalSize: 1200
+                      schemePosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 0
+                          yCoordinate: 0
+                          zCoordinate: 600
+                        lowerRightRearCorner:
+                          xCoordinate: 500
+                          yCoordinate: 700
+                          zCoordinate: 1800
+                      schemeSize: 1200
+                    touchScreenInfoList:
+                    - touchscreenId: touchscreenInfo@a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                      audioSpeakerInfoRefList:
+                      - audioSpeakerInfo@f6a7b8c9-d0e1-2345-fabc-456789012345
+                      physicalPosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 50
+                          yCoordinate: 50
+                          zCoordinate: 0
+                        lowerRightRearCorner:
+                          xCoordinate: 450
+                          yCoordinate: 350
+                          zCoordinate: 30
+                      physicalSize: 300
+                      schemePosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 50
+                          yCoordinate: 50
+                          zCoordinate: 0
+                        lowerRightRearCorner:
+                          xCoordinate: 450
+                          yCoordinate: 350
+                          zCoordinate: 30
+                      schemeSize: 300
+                    codeScannerInfoList:
+                    - codeScannerId: codeScannerInfo@e5f6a7b8-c9d0-1234-efab-345678901234
+                      supportedCodeScannerCodesList:
+                      - QR
+                      - CODE128
+                      - EAN128
+                      - CODE_DATA_MATRIX
+                      audioSpeakerInfoRefList:
+                      - audioSpeakerInfo@f6a7b8c9-d0e1-2345-fabc-456789012345
+                      physicalPosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 150
+                          yCoordinate: 380
+                          zCoordinate: 0
+                        lowerRightRearCorner:
+                          xCoordinate: 350
+                          yCoordinate: 480
+                          zCoordinate: 60
+                      physicalSize: 100
+                      schemePosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 150
+                          yCoordinate: 380
+                          zCoordinate: 0
+                        lowerRightRearCorner:
+                          xCoordinate: 350
+                          yCoordinate: 480
+                          zCoordinate: 60
+                      schemeSize: 100
+                    compartmentInfoList:
+                    - compartmentId: compartmentInfo@d4e5f6a7-b8c9-0123-defa-234567890123
+                      compartmentType: STANDARD_PACKAGE_COMPARTMENT
+                      compartmentSizeClass: M
+                      supportsOpen: true
+                      physicalPosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 0
+                          yCoordinate: 0
+                          zCoordinate: 600
+                        lowerRightRearCorner:
+                          xCoordinate: 400
+                          yCoordinate: 200
+                          zCoordinate: 1100
+                      physicalSize: 200
+                      schemePosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 0
+                          yCoordinate: 0
+                          zCoordinate: 600
+                        lowerRightRearCorner:
+                          xCoordinate: 400
+                          yCoordinate: 200
+                          zCoordinate: 1100
+                      schemeSize: 200
+                    - compartmentId: compartmentInfo@11111111-2222-3333-4444-555555555555
+                      compartmentType: STANDARD_PACKAGE_COMPARTMENT
+                      compartmentSizeClass: L
+                      supportsOpen: true
+                      physicalPosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 0
+                          yCoordinate: 200
+                          zCoordinate: 600
+                        lowerRightRearCorner:
+                          xCoordinate: 400
+                          yCoordinate: 500
+                          zCoordinate: 1100
+                      physicalSize: 300
+                      schemePosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 0
+                          yCoordinate: 200
+                          zCoordinate: 600
+                        lowerRightRearCorner:
+                          xCoordinate: 400
+                          yCoordinate: 500
+                          zCoordinate: 1100
+                      schemeSize: 300
+                    - compartmentId: compartmentInfo@aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+                      compartmentType: STANDARD_PACKAGE_COMPARTMENT
+                      compartmentSizeClass: S
+                      supportsOpen: true
+                      physicalPosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 0
+                          yCoordinate: 500
+                          zCoordinate: 600
+                        lowerRightRearCorner:
+                          xCoordinate: 400
+                          yCoordinate: 600
+                          zCoordinate: 1100
+                      physicalSize: 100
+                      schemePosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 0
+                          yCoordinate: 500
+                          zCoordinate: 600
+                        lowerRightRearCorner:
+                          xCoordinate: 400
+                          yCoordinate: 600
+                          zCoordinate: 1100
+                      schemeSize: 100
+                    proximitySensorInfoList:
+                    - proximitySensorId: proximitySensorInfo@b2c3d4e5-f6a7-8901-bcde-f12345678901
+                      physicalPosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 240
+                          yCoordinate: 10
+                          zCoordinate: 0
+                        lowerRightRearCorner:
+                          xCoordinate: 260
+                          yCoordinate: 30
+                          zCoordinate: 20
+                      physicalSize: 30
+                      schemePosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 240
+                          yCoordinate: 10
+                          zCoordinate: 0
+                        lowerRightRearCorner:
+                          xCoordinate: 260
+                          yCoordinate: 30
+                          zCoordinate: 20
+                      schemeSize: 30
+                    wakeupButtonInfoList:
+                    - wakeupButtonId: wakeupButtonInfo@a7b8c9d0-e1f2-3456-abcd-567890123456
+                      physicalPosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 220
+                          yCoordinate: 420
+                          zCoordinate: 0
+                        lowerRightRearCorner:
+                          xCoordinate: 260
+                          yCoordinate: 460
+                          zCoordinate: 10
+                      physicalSize: 40
+                      schemePosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 220
+                          yCoordinate: 420
+                          zCoordinate: 0
+                        lowerRightRearCorner:
+                          xCoordinate: 260
+                          yCoordinate: 460
+                          zCoordinate: 10
+                      schemeSize: 40
+                    audioSpeakerInfoList:
+                    - audioSpeakerId: audioSpeakerInfo@f6a7b8c9-d0e1-2345-fabc-456789012345
+                      audioSpeakerClassList:
+                      - MP3
+                      - AUDIO_TON
+                      physicalPosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 200
+                          yCoordinate: 150
+                          zCoordinate: 0
+                        lowerRightRearCorner:
+                          xCoordinate: 250
+                          yCoordinate: 200
+                          zCoordinate: 50
+                      physicalSize: 50
+                      schemePosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 200
+                          yCoordinate: 150
+                          zCoordinate: 0
+                        lowerRightRearCorner:
+                          xCoordinate: 250
+                          yCoordinate: 200
+                          zCoordinate: 50
+                      schemeSize: 50
+                    lightingUnitInfoList:
+                    - lightingUnitId: lightingUnitInfo@c3d4e5f6-a7b8-9012-cdef-123456789012
+                      lightingCapabilities:
+                      - DIMMABLE
+                      - LIGHT_COLOR
+                      physicalPosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 0
+                          yCoordinate: 0
+                          zCoordinate: 490
+                        lowerRightRearCorner:
+                          xCoordinate: 500
+                          yCoordinate: 20
+                          zCoordinate: 500
+                      physicalSize: 60
+                      schemePosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 0
+                          yCoordinate: 0
+                          zCoordinate: 490
+                        lowerRightRearCorner:
+                          xCoordinate: 500
+                          yCoordinate: 20
+                          zCoordinate: 500
+                      schemeSize: 60
+                    - lightingUnitId: lightingUnitInfo@d4a5b6c7-e8f9-0123-abcd-456789abcdef
+                      lightingCapabilities:
+                      - DIMMABLE
+                      physicalPosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 0
+                          yCoordinate: 0
+                          zCoordinate: 1190
+                        lowerRightRearCorner:
+                          xCoordinate: 500
+                          yCoordinate: 20
+                          zCoordinate: 1200
+                      physicalSize: 60
+                      schemePosition:
+                        leftFrontUpperCorner:
+                          xCoordinate: 0
+                          yCoordinate: 0
+                          zCoordinate: 1190
+                        lowerRightRearCorner:
+                          xCoordinate: 500
+                          yCoordinate: 20
+                          zCoordinate: 1200
+                      schemeSize: 60
+                    geoPosition:
+                      latitude: 50.9375
+                      longitude: 6.9603
+        '400':
+          description: Bad Request â€” a required parameter is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: INVALID_LOCKER_ID
+                message: Path parameter 'lockerId' is not a valid UUID.
+                timestamp: '2026-03-06T12:05:00Z'
+        '500':
+          description: Internal Server Error â€” an unexpected error occurred on the
+            server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseTo'
+              example:
+                errorCode: CONFIGURATION_READ_ERROR
+                message: Failed to read the locker configuration due to an internal
+                  error.
+                timestamp: '2026-03-06T12:05:01Z'
+components:
+  securitySchemes:
+    mTLS:
+      type: mutualTLS
+      description: Mutual TLS - client and server certificates issued by DHL PKI (https://cmc.dhl.com/)
+  parameters:
+    LockerId:
+      name: lockerId
+      in: path
+      required: true
+      description: Business key of the machine.
+      schema:
+        $ref: '#/components/schemas/LockerIdTo'
+    ClientVersionHeader:
+      name: Client-Version
+      in: header
+      required: true
+      description: Client version (PS-Version) in major.minor.patch format.
+      schema:
+        type: string
+        pattern: ^\d+\.\d+\.\d+$
+        example: 1.2.6
+    LockToken:
+      name: Lock-Token
+      in: header
+      required: true
+      description: Exclusive-control token (Base64-encoded). Used to authenticate
+        exclusive control.
+      schema:
+        $ref: '#/components/schemas/LockExclusiveHandleTo'
+    LockTokenOptional:
+      name: Lock-Token
+      in: header
+      required: false
+      description: Optional exclusive-control token (Base64-encoded). If no active
+        lock exists, the command is still executed.
+      schema:
+        $ref: '#/components/schemas/LockExclusiveHandleTo'
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Unique command number for idempotency protection. Prevents duplicate
+        execution during retries.
+      schema:
+        $ref: '#/components/schemas/CommandUniqueNumberTo'
+    ApiVersion:
+      name: version
+      in: path
+      required: true
+      description: API version string in 3-digit major-minor format, e.g. v010.
+      schema:
+        type: string
+        pattern: ^v\d{3}$
+        example: v010
+  schemas:
+    AudioSpeakerIdTo:
+      type: string
+      pattern: ^audioSpeakerInfo@[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+      example: audioSpeakerInfo@f6a7b8c9-d0e1-2345-fabc-456789012345
+    CodeScannerIdTo:
+      type: string
+      pattern: ^codeScannerInfo@[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+      example: codeScannerInfo@e5f6a7b8-c9d0-1234-efab-345678901234
+    CommandUniqueNumberTo:
+      type: string
+      format: uuid
+      example: 0c311e5a-6e6d-4d93-9e1c-0c0f7e48c8f1
+    CompartmentIdTo:
+      type: string
+      pattern: ^compartmentInfo@[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+      description: >-
+        Business identifier of a compartment, assigned as a UUID during
+        commissioning. The ID is permanently bound to a physical location
+        within the locker. On hardware replacement, the recommissioning
+        process reassigns the original ID to the same physical slot.
+      example: compartmentInfo@d4e5f6a7-b8c9-0123-defa-234567890123
+    ControllerModuleIdTo:
+      type: string
+      pattern: ^controllerModuleInfo@[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+      example: controllerModuleInfo@c9d0e1f2-a3b4-5678-cdef-789012345678
+    LightingUnitIdTo:
+      type: string
+      pattern: ^lightingUnitInfo@[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+      example: lightingUnitInfo@c3d4e5f6-a7b8-9012-cdef-123456789012
+    LockExclusiveHandleTo:
+      type: string
+      format: byte
+      example: gy12p6N1UC4WJp4H1tFhVqtlzgm7qYp4qVnq5p/PLu4=
+    LockerIdTo:
+      type: string
+      format: uuid
+      description: Business key of the machine as a UUID. It is assigned by the PS
+        backend during commissioning and is immutable. If supplied by the caller,
+        the API MAY validate it against the locally configured machine identity.
+      example: f47ac10b-58cc-4372-a567-0e02b2c3d479
+    ProximitySensorIdTo:
+      type: string
+      pattern: ^proximitySensorInfo@[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+      example: proximitySensorInfo@b2c3d4e5-f6a7-8901-bcde-f12345678901
+    StandardModuleIdTo:
+      type: string
+      pattern: ^standardModuleInfo@[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+      example: standardModuleInfo@b8c9d0e1-f2a3-4567-bcde-678901234567
+    TouchscreenIdTo:
+      type: string
+      pattern: ^touchscreenInfo@[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+      example: touchscreenInfo@a1b2c3d4-e5f6-7890-abcd-ef1234567890
+    WakeupButtonIdTo:
+      type: string
+      pattern: ^wakeupButtonInfo@[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+      example: wakeupButtonInfo@a7b8c9d0-e1f2-3456-abcd-567890123456
+    ErrorResponseTo:
+      type: object
+      properties:
+        errorCode:
+          type: string
+          description: Machine-readable error code.
+          example: PARAMETER_MISSING
+        message:
+          type: string
+          description: Human-readable error message.
+          example: Required parameter 'Lock-Token' is missing.
+        timestamp:
+          type: string
+          format: date-time
+          description: Time at which the error occurred.
+          example: '2026-03-05T14:30:00Z'
+    AudioSpeakerLogicalHealthTo:
+      type: object
+      properties:
+        audioSpeakerId:
+          $ref: '#/components/schemas/AudioSpeakerIdTo'
+        healthStatus:
+          $ref: '#/components/schemas/HealthStatusTo'
+    CodeScannerLogicalHealthTo:
+      type: object
+      properties:
+        codeScannerId:
+          $ref: '#/components/schemas/CodeScannerIdTo'
+        healthStatus:
+          $ref: '#/components/schemas/HealthStatusTo'
+    CompartmentLogicalHealthTo:
+      type: object
+      properties:
+        compartmentId:
+          $ref: '#/components/schemas/CompartmentIdTo'
+        healthStatus:
+          $ref: '#/components/schemas/HealthStatusTo'
+    ControllerModuleLogicalHealthTo:
+      type: object
+      properties:
+        controllerModuleId:
+          $ref: '#/components/schemas/ControllerModuleIdTo'
+        healthStatus:
+          $ref: '#/components/schemas/HealthStatusTo'
+    HealthStatusTo:
+      type: string
+      enum:
+      - OK_GREEN
+      - PART_OK_YELLOW
+      - NOT_OK_RED
+      - UNDEFINED
+      example: OK_GREEN
+    LightingUnitLogicalHealthTo:
+      type: object
+      properties:
+        lightingUnitId:
+          $ref: '#/components/schemas/LightingUnitIdTo'
+        healthStatus:
+          $ref: '#/components/schemas/HealthStatusTo'
+    LockerLogicalHealthTo:
+      type: object
+      properties:
+        lockerId:
+          $ref: '#/components/schemas/LockerIdTo'
+        healthStatus:
+          $ref: '#/components/schemas/HealthStatusTo'
+    LockerLogicalOverallHealthTo:
+      type: object
+      properties:
+        lockerId:
+          $ref: '#/components/schemas/LockerIdTo'
+        healthStatus:
+          $ref: '#/components/schemas/HealthStatusTo'
+        controllerModuleHealthList:
+          type: array
+          items:
+            $ref: '#/components/schemas/ControllerModuleLogicalHealthTo'
+        standardModuleHealthList:
+          type: array
+          items:
+            $ref: '#/components/schemas/StandardModuleLogicalHealthTo'
+        touchScreenHealthList:
+          type: array
+          items:
+            $ref: '#/components/schemas/TouchScreenLogicalHealthTo'
+        codeScannerHealthList:
+          type: array
+          items:
+            $ref: '#/components/schemas/CodeScannerLogicalHealthTo'
+        proximitySensorHealthList:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProximitySensorLogicalHealthTo'
+        wakeupButtonHealthList:
+          type: array
+          items:
+            $ref: '#/components/schemas/WakeupButtonLogicalHealthTo'
+        audioSpeakerHealthList:
+          type: array
+          items:
+            $ref: '#/components/schemas/AudioSpeakerLogicalHealthTo'
+        lightingUnitHealthList:
+          type: array
+          items:
+            $ref: '#/components/schemas/LightingUnitLogicalHealthTo'
+        compartmentHealthList:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompartmentLogicalHealthTo'
+    ProximitySensorLogicalHealthTo:
+      type: object
+      properties:
+        proximitySensorId:
+          $ref: '#/components/schemas/ProximitySensorIdTo'
+        healthStatus:
+          $ref: '#/components/schemas/HealthStatusTo'
+    StandardModuleLogicalHealthTo:
+      type: object
+      properties:
+        standardModuleId:
+          $ref: '#/components/schemas/StandardModuleIdTo'
+        healthStatus:
+          $ref: '#/components/schemas/HealthStatusTo'
+    TouchScreenLogicalHealthTo:
+      type: object
+      properties:
+        touchscreenId:
+          $ref: '#/components/schemas/TouchscreenIdTo'
+        healthStatus:
+          $ref: '#/components/schemas/HealthStatusTo'
+    WakeupButtonLogicalHealthTo:
+      type: object
+      properties:
+        wakeupButtonId:
+          $ref: '#/components/schemas/WakeupButtonIdTo'
+        healthStatus:
+          $ref: '#/components/schemas/HealthStatusTo'
+    AudioSpeakerLogicalStateTo:
+      type: object
+      properties:
+        audioSpeakerId:
+          $ref: '#/components/schemas/AudioSpeakerIdTo'
+        audioSpeakerState:
+          $ref: '#/components/schemas/AudioSpeakerStateType'
+    CodeScannerLogicalStateTo:
+      type: object
+      properties:
+        codeScannerId:
+          $ref: '#/components/schemas/CodeScannerIdTo'
+        codeScannerState:
+          $ref: '#/components/schemas/CodeScannerStateType'
+    CompartmentLogicalStateTo:
+      type: object
+      properties:
+        compartmentId:
+          $ref: '#/components/schemas/CompartmentIdTo'
+        compartmentState:
+          $ref: '#/components/schemas/CompartmentStateType'
+    ControllerModuleLogicalStateTo:
+      type: object
+      properties:
+        controllerModuleId:
+          $ref: '#/components/schemas/ControllerModuleIdTo'
+        controllerModuleState:
+          $ref: '#/components/schemas/ControllerModuleStateType'
+    LightingUnitLogicalStateTo:
+      type: object
+      properties:
+        lightingUnitId:
+          $ref: '#/components/schemas/LightingUnitIdTo'
+        lightingUnitState:
+          $ref: '#/components/schemas/LightingUnitStateType'
+    LockerLogicalOverallStateTo:
+      type: object
+      properties:
+        lockerId:
+          $ref: '#/components/schemas/LockerIdTo'
+        controllerModuleStateList:
+          type: array
+          items:
+            $ref: '#/components/schemas/ControllerModuleLogicalStateTo'
+        standardModuleStateList:
+          type: array
+          items:
+            $ref: '#/components/schemas/StandardModuleLogicalStateTo'
+        touchScreenStateList:
+          type: array
+          items:
+            $ref: '#/components/schemas/TouchScreenLogicalStateTo'
+        codeScannerStateList:
+          type: array
+          items:
+            $ref: '#/components/schemas/CodeScannerLogicalStateTo'
+        proximitySensorStateList:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProximitySensorLogicalStateTo'
+        wakeupButtonStateList:
+          type: array
+          items:
+            $ref: '#/components/schemas/WakeupButtonLogicalStateTo'
+        audioSpeakerStateList:
+          type: array
+          items:
+            $ref: '#/components/schemas/AudioSpeakerLogicalStateTo'
+        lightingUnitStateList:
+          type: array
+          items:
+            $ref: '#/components/schemas/LightingUnitLogicalStateTo'
+        compartmentStateList:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompartmentLogicalStateTo'
+        lockerLogicalState:
+          $ref: '#/components/schemas/LockerLogicalStateTo'
+    LockerLogicalStateTo:
+      type: object
+      properties:
+        lockerId:
+          $ref: '#/components/schemas/LockerIdTo'
+        lockerState:
+          $ref: '#/components/schemas/LockerStateType'
+    ProximitySensorLogicalStateTo:
+      type: object
+      properties:
+        proximitySensorId:
+          $ref: '#/components/schemas/ProximitySensorIdTo'
+        proximitySensorState:
+          $ref: '#/components/schemas/ProximitySensorStateType'
+    StandardModuleLogicalStateTo:
+      type: object
+      properties:
+        standardModuleId:
+          $ref: '#/components/schemas/StandardModuleIdTo'
+        standardModuleState:
+          $ref: '#/components/schemas/StandardModuleStateType'
+    TouchScreenLogicalStateTo:
+      type: object
+      properties:
+        touchscreenId:
+          $ref: '#/components/schemas/TouchscreenIdTo'
+        touchscreenState:
+          $ref: '#/components/schemas/TouchscreenStateType'
+    WakeupButtonLogicalStateTo:
+      type: object
+      properties:
+        wakeupButtonId:
+          $ref: '#/components/schemas/WakeupButtonIdTo'
+        wakeupButtonState:
+          $ref: '#/components/schemas/WakeupButtonStateType'
+    AudioSignalTo:
+      type: object
+      properties:
+        audioData:
+          type: string
+          format: byte
+          description: Base64-encoded audio data
+          example: UklGRiQAAABXQVZFZm10IBAAAAABAAEA
+        audioCoding:
+          $ref: '#/components/schemas/AudioSpeakerClassEnum'
+        volume:
+          type: integer
+          format: int32
+          description: Volume level (0â€“100 percent)
+          example: 75
+        duration:
+          type: string
+          format: duration
+          description: ISO 8601 duration, e.g. "PT5S"
+          example: PT5S
+    AudioSpeakerClassEnum:
+      type: string
+      enum:
+      - MP3
+      - AUDIO_TON
+      - BUSSING
+      example: MP3
+    AudioSpeakerLogicalInfoTo:
+      type: object
+      properties:
+        audioSpeakerId:
+          $ref: '#/components/schemas/AudioSpeakerIdTo'
+        audioSpeakerClassList:
+          type: array
+          items:
+            $ref: '#/components/schemas/AudioSpeakerClassEnum'
+        physicalPosition:
+          $ref: '#/components/schemas/PhysicalPositionTo'
+        physicalSize:
+          type: integer
+          format: int32
+          description: Physical size in mm
+        schemePosition:
+          $ref: '#/components/schemas/SchemePositionTo'
+        schemeSize:
+          type: integer
+          format: int32
+          description: Scheme size in mm
+    AudioSpeakerStateType:
+      type: string
+      enum:
+      - true
+      - false
+      - UNDEFINED
+    CodeScannerCodesEnum:
+      type: string
+      enum:
+      - EAN8
+      - EAN13
+      - UPC_A
+      - UPC_E
+      - CODE39
+      - CODE25_INTERLEAVED
+      - CODE25_NORMAL_5_BARS
+      - CODE25_INDUSTRIAL
+      - CODE25_MATRIX_3_BARS
+      - CODE25_CIP_HR
+      - CODABAR_STANDARD
+      - CODABAR_ASCII
+      - CODE128
+      - EAN128
+      - CODE93
+      - CODABLOCK_A
+      - CODABLOCK_F
+      - MSI
+      - PLESSEY
+      - TELEPEN
+      - DELTA_IBM
+      - CODE11
+      - CODE16K
+      - CODE49
+      - CODE_PDF417
+      - CODE_ISBT128
+      - CODE_DATA_MATRIX
+      - QR
+    CodeScannerLogicalInfoTo:
+      type: object
+      properties:
+        codeScannerId:
+          $ref: '#/components/schemas/CodeScannerIdTo'
+        supportedCodeScannerCodesList:
+          type: array
+          items:
+            $ref: '#/components/schemas/CodeScannerCodesEnum'
+        audioSpeakerInfoRefList:
+          type: array
+          items:
+            $ref: '#/components/schemas/AudioSpeakerIdTo'
+        physicalPosition:
+          $ref: '#/components/schemas/PhysicalPositionTo'
+        physicalSize:
+          type: integer
+          format: int32
+          description: Physical size in mm
+        schemePosition:
+          $ref: '#/components/schemas/SchemePositionTo'
+        schemeSize:
+          type: integer
+          format: int32
+          description: Scheme size in mm
+    CodeScannerStateType:
+      type: string
+      enum:
+      - ACTIVE
+      - INACTIVE
+    CompartmentLogicalInfoTo:
+      type: object
+      properties:
+        compartmentId:
+          $ref: '#/components/schemas/CompartmentIdTo'
+        compartmentType:
+          type: string
+          enum:
+          - STANDARD_PACKAGE_COMPARTMENT
+          - CONTROLLER
+        compartmentSizeClass:
+          type: string
+          enum:
+          - S
+          - M
+          - L
+          - XL
+          - UNKNOWN
+        supportsOpen:
+          type: boolean
+        physicalPosition:
+          $ref: '#/components/schemas/PhysicalPositionTo'
+        physicalSize:
+          type: integer
+          format: int32
+          description: Physical size in mm
+        schemePosition:
+          $ref: '#/components/schemas/SchemePositionTo'
+        schemeSize:
+          type: integer
+          format: int32
+          description: Scheme size in mm
+    CompartmentStateType:
+      type: string
+      enum:
+      - OPEN
+      - CLOSE
+      - INACTIVE
+      - CHILD_SAVETY
+    ControllerModuleLogicalInfoTo:
+      type: object
+      properties:
+        controllerModuleId:
+          $ref: '#/components/schemas/ControllerModuleIdTo'
+        touchScreenInfoRefList:
+          type: array
+          items:
+            $ref: '#/components/schemas/TouchscreenIdTo'
+        codeScannerInfoRefList:
+          type: array
+          items:
+            $ref: '#/components/schemas/CodeScannerIdTo'
+        proximitySensorInfoRefList:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProximitySensorIdTo'
+        wakeupButtonInfoRefList:
+          type: array
+          items:
+            $ref: '#/components/schemas/WakeupButtonIdTo'
+        audioSpeakerInfoRefList:
+          type: array
+          items:
+            $ref: '#/components/schemas/AudioSpeakerIdTo'
+        lightingUnitInfoRefList:
+          type: array
+          items:
+            $ref: '#/components/schemas/LightingUnitIdTo'
+        compartmentInfoRefList:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompartmentIdTo'
+        physicalPosition:
+          $ref: '#/components/schemas/PhysicalPositionTo'
+        physicalSize:
+          type: integer
+          format: int32
+          description: Physical size in mm
+        schemePosition:
+          $ref: '#/components/schemas/SchemePositionTo'
+        schemeSize:
+          type: integer
+          format: int32
+          description: Scheme size in mm
+    ControllerModuleStateType:
+      type: string
+      enum:
+      - ACTIVE
+      - INACTIVE
+      - UNDEFINED
+    EnableCodeScannerRequestTo:
+      type: object
+      description: Optional request body for enableCodeScanner. Restricts the scanner
+        to the specified code types.
+      properties:
+        codeTypes:
+          type: array
+          description: List of code types the scanner should focus on. If omitted,
+            the scanner enables all supported code types. An empty list is invalid.
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CodeScannerCodesEnum'
+          example:
+          - QR
+          - CODE128
+          - EAN13
+    GeoPositionTo:
+      type: object
+      properties:
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+    LightingUnitLogicalInfoTo:
+      type: object
+      properties:
+        lightingUnitId:
+          $ref: '#/components/schemas/LightingUnitIdTo'
+        lightingCapabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/LightingUnitParameterEnum'
+        physicalPosition:
+          $ref: '#/components/schemas/PhysicalPositionTo'
+        physicalSize:
+          type: integer
+          format: int32
+          description: Physical size in mm
+        schemePosition:
+          $ref: '#/components/schemas/SchemePositionTo'
+        schemeSize:
+          type: integer
+          format: int32
+          description: Scheme size in mm
+    LightingUnitParameterEnum:
+      type: string
+      enum:
+      - DIMMABLE
+      - LIGHT_COLOR
+      - COLOR_TEMPERATURE
+    LightingUnitStateType:
+      type: string
+      enum:
+      - true
+      - false
+      - UNDEFINED
+    LightParameterTo:
+      type: object
+      properties:
+        brightness:
+          type: integer
+          format: int32
+          description: Brightness level (0â€“100 percent)
+          example: 80
+        lightColor:
+          type: integer
+          format: int32
+          description: RGB color value as integer (e.g. 16777215 = white)
+          example: 16777215
+        lightTemperature:
+          type: integer
+          format: int32
+          description: Color temperature in Kelvin (e.g. 4000 = neutral white)
+          example: 4000
+    LockerLogicalInfoTo:
+      type: object
+      properties:
+        lockerId:
+          $ref: '#/components/schemas/LockerIdTo'
+        controllerModuleInfoList:
+          type: array
+          items:
+            $ref: '#/components/schemas/ControllerModuleLogicalInfoTo'
+        standardModuleInfoList:
+          type: array
+          items:
+            $ref: '#/components/schemas/StandardModuleLogicalInfoTo'
+        touchScreenInfoList:
+          type: array
+          items:
+            $ref: '#/components/schemas/TouchScreenLogicalInfoTo'
+        codeScannerInfoList:
+          type: array
+          items:
+            $ref: '#/components/schemas/CodeScannerLogicalInfoTo'
+        compartmentInfoList:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompartmentLogicalInfoTo'
+        proximitySensorInfoList:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProximitySensorLogicalInfoTo'
+        wakeupButtonInfoList:
+          type: array
+          items:
+            $ref: '#/components/schemas/WakeupButtonLogicalInfoTo'
+        audioSpeakerInfoList:
+          type: array
+          items:
+            $ref: '#/components/schemas/AudioSpeakerLogicalInfoTo'
+        lightingUnitInfoList:
+          type: array
+          items:
+            $ref: '#/components/schemas/LightingUnitLogicalInfoTo'
+        geoPosition:
+          $ref: '#/components/schemas/GeoPositionTo'
+    LockerStateType:
+      type: string
+      enum:
+      - ACTIVE
+      - INACTIVE
+      - POWERSAVE
+      - OUT_OF_ORDER
+    LockerVersionTo:
+      type: object
+      properties:
+        lockerId:
+          $ref: '#/components/schemas/LockerIdTo'
+        version:
+          type: string
+          example: 1.0.0
+    PhysicalCoordinatesTo:
+      type: object
+      properties:
+        xCoordinate:
+          type: integer
+          format: int32
+        yCoordinate:
+          type: integer
+          format: int32
+        zCoordinate:
+          type: integer
+          format: int32
+    PhysicalPositionTo:
+      type: object
+      properties:
+        leftFrontUpperCorner:
+          $ref: '#/components/schemas/PhysicalCoordinatesTo'
+        lowerRightRearCorner:
+          $ref: '#/components/schemas/PhysicalCoordinatesTo'
+    ProximitySensorLogicalInfoTo:
+      type: object
+      properties:
+        proximitySensorId:
+          $ref: '#/components/schemas/ProximitySensorIdTo'
+        physicalPosition:
+          $ref: '#/components/schemas/PhysicalPositionTo'
+        physicalSize:
+          type: integer
+          format: int32
+          description: Physical size in mm
+        schemePosition:
+          $ref: '#/components/schemas/SchemePositionTo'
+        schemeSize:
+          type: integer
+          format: int32
+          description: Scheme size in mm
+    ProximitySensorStateType:
+      type: string
+      enum:
+      - ACTIVE
+      - INACTIVE
+      - UNDEFINED
+    SchemeCoordinatesTo:
+      type: object
+      properties:
+        xCoordinate:
+          type: integer
+          format: int32
+        yCoordinate:
+          type: integer
+          format: int32
+        zCoordinate:
+          type: integer
+          format: int32
+    SchemePositionTo:
+      type: object
+      properties:
+        leftFrontUpperCorner:
+          $ref: '#/components/schemas/SchemeCoordinatesTo'
+        lowerRightRearCorner:
+          $ref: '#/components/schemas/SchemeCoordinatesTo'
+    StandardModuleLogicalInfoTo:
+      type: object
+      properties:
+        standardModuleId:
+          $ref: '#/components/schemas/StandardModuleIdTo'
+        compartmentInfoRefList:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompartmentIdTo'
+        lightingUnitInfoRefList:
+          type: array
+          items:
+            $ref: '#/components/schemas/LightingUnitIdTo'
+        physicalPosition:
+          $ref: '#/components/schemas/PhysicalPositionTo'
+        physicalSize:
+          type: integer
+          format: int32
+          description: Physical size in mm
+        schemePosition:
+          $ref: '#/components/schemas/SchemePositionTo'
+        schemeSize:
+          type: integer
+          format: int32
+          description: Scheme size in mm
+    StandardModuleStateType:
+      type: string
+      enum:
+      - ACTIVE
+      - INACTIVE
+      - UNDEFINED
+    TouchScreenLogicalInfoTo:
+      type: object
+      properties:
+        touchscreenId:
+          $ref: '#/components/schemas/TouchscreenIdTo'
+        audioSpeakerInfoRefList:
+          type: array
+          items:
+            $ref: '#/components/schemas/AudioSpeakerIdTo'
+        physicalPosition:
+          $ref: '#/components/schemas/PhysicalPositionTo'
+        physicalSize:
+          type: integer
+          format: int32
+          description: Physical size in mm
+        schemePosition:
+          $ref: '#/components/schemas/SchemePositionTo'
+        schemeSize:
+          type: integer
+          format: int32
+          description: Scheme size in mm
+    TouchscreenStateType:
+      type: string
+      enum:
+      - ACTIVE
+      - INACTIVE
+      - POWERSAVE
+      - UNDEFINED
+    WakeupButtonLogicalInfoTo:
+      type: object
+      properties:
+        wakeupButtonId:
+          $ref: '#/components/schemas/WakeupButtonIdTo'
+        physicalPosition:
+          $ref: '#/components/schemas/PhysicalPositionTo'
+        physicalSize:
+          type: integer
+          format: int32
+          description: Physical size in mm
+        schemePosition:
+          $ref: '#/components/schemas/SchemePositionTo'
+        schemeSize:
+          type: integer
+          format: int32
+          description: Scheme size in mm
+    WakeupButtonStateType:
+      type: string
+      enum:
+      - ACTIVE
+      - INACTIVE
+      - UNDEFINED
+

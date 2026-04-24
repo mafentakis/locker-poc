@@ -1,0 +1,782 @@
+asyncapi: '2.6.0'
+id: 'urn:dhl:psfusion:delivery-machine-business-event:v010'
+defaultContentType: application/json
+info:
+  title: PS Fusion DeliveryMachineBusinessEvent Asynchronous API
+  version: 'v010'
+  description: |-
+    Asynchronous MQTT event interface of the PS Fusion parcel locker.
+    It complements the synchronous business-function interface in `DeliveryMachineBusinessFunction.Open-API-en.yaml`
+    with business events emitted by the locker.
+
+    According to the PL SSB, commands/queries and events are separated because
+    execution and feedback are temporally decoupled. Events can also occur
+    without a direct one-to-one relationship to an ongoing business process.
+    There is no runtime dependency on the synchronous interface.
+
+    The version baseline of this interface is intentionally aligned with the
+    synchronous contract version (`v010`).
+
+    Business context according to the SSB:
+    - The interface is formally internal to the system, but it connects the decentralized
+      PS Fusion machines with the business logic running in the data center,
+      `(L)PS_Service`, and must therefore be treated like a system interface.
+    - `PS_Fusion` is the publisher and `(L)PS_Service` is the subscriber.
+    - An MQTT message broker sits between them; communication is
+      stateless and topic-based.
+    - Events are processed and communicated individually; bulk events and
+      request-response correlations are not intended.
+    - Event messages must be uniquely identifiable and handled idempotently.
+
+    ## Device ID Assignment and Commissioning
+
+    All device identifiers (compartmentId, controllerModuleId, etc.) are UUIDs
+    assigned during commissioning by the technician. They are business-level
+    identifiers permanently bound to a physical location within the locker
+    (e.g., module 2, top position). If hardware is replaced for maintenance or
+    repair, the recommissioning process reassigns the original ID to the device
+    at the same physical location, ensuring a stable mapping regardless of
+    underlying hardware changes.
+
+  contact:
+    name: Axel Nöllchen (IT P&P)
+    email: axel.noellchen@deutschepost.de
+servers:
+  mqttBroker:
+    url: '{brokerHost}:{brokerPort}'
+    protocol: mqtt
+    protocolVersion: '5.0'
+    description: Centrally provided MQTT message broker for business PS Fusion events between PS_Fusion as publisher and (L)PS_Service as subscriber.
+    variables:
+      brokerHost:
+        default: mqtt.example.invalid
+        description: Broker host name or IP address.
+      brokerPort:
+        default: '1883'
+        description: Broker port.
+
+x-related-sync-contract:
+  file: src/resources/DeliveryMachineBusinessFunction.Open-API-en.yaml
+  versionBaseline: v010
+
+x-unmodeled-sync-operation-remarks:
+  - operationId: switchOnTouchscreen
+    remark: No dedicated Java event DTO exists yet.
+  - operationId: switchOffTouchscreen
+    remark: No dedicated Java event DTO exists yet.
+  - operationId: switchOnLightUnit
+    remark: No dedicated Java event DTO exists yet.
+  - operationId: switchOffLightUnit
+    remark: No dedicated Java event DTO exists yet.
+  - operationId: doOutputAudioSpeaker
+    remark: No dedicated Java event DTO exists yet.
+
+channels:
+  'psfusion/business-event/v010/locker/exclusive-lock/acquire':
+    description: MQTT topic on which all PS Fusion machines publish events for acquiring an exclusive locker lock.
+    publish:
+      operationId: publishAcquireLockerExclusiveLockEvent
+      summary: Topic for exclusive-lock acquisition events from all PS Fusion machines
+      message:
+        $ref: '#/components/messages/AcquireLockerExclusiveLockEventMsg'
+
+  'psfusion/business-event/v010/locker/exclusive-lock/release':
+    description: MQTT topic on which all PS Fusion machines publish events for releasing an exclusive locker lock.
+    publish:
+      operationId: publishReleaseLockerExclusiveLockEvent
+      summary: Topic for exclusive-lock release events from all PS Fusion machines
+      message:
+        $ref: '#/components/messages/ReleaseLockerExclusiveLockEventMsg'
+
+  'psfusion/business-event/v010/locker/exclusive-lock/extend':
+    description: MQTT topic on which all PS Fusion machines publish events for extending an exclusive locker lock.
+    publish:
+      operationId: publishExtendLockerExclusiveLockEvent
+      summary: Topic for exclusive-lock extension events from all PS Fusion machines
+      message:
+        $ref: '#/components/messages/ExtendLockerExclusiveLockEventMsg'
+
+  'psfusion/business-event/v010/locker/wakeup':
+    description: MQTT topic on which all PS Fusion machines publish wake-up events triggered by a command or an external trigger.
+    publish:
+      operationId: publishWakeupLockerEvent
+      summary: Topic for all wake-up events from all PS Fusion machines
+      message:
+        $ref: '#/components/messages/WakeupLockerEventMsg'
+
+  'psfusion/business-event/v010/locker/sleep':
+    description: MQTT topic on which all PS Fusion machines publish sleep events when switching to power-saving mode.
+    publish:
+      operationId: publishSleepLockerEvent
+      summary: Topic for all sleep events from all PS Fusion machines
+      message:
+        $ref: '#/components/messages/SleepLockerEventMsg'
+
+  'psfusion/business-event/v010/locker/commissioning':
+    description: MQTT topic on which all PS Fusion machines publish commissioning events during startup or configuration changes.
+    publish:
+      operationId: publishCommissioningEvent
+      summary: Topic for all commissioning events from all PS Fusion machines
+      message:
+        $ref: '#/components/messages/CommissioningEventMsg'
+
+  'psfusion/business-event/v010/locker/out-of-service':
+    description: MQTT topic on which all PS Fusion machines publish out-of-service events when switching into an out-of-service state.
+    publish:
+      operationId: publishOutOfServiceEvent
+      summary: Topic for all out-of-service events from all PS Fusion machines
+      message:
+        $ref: '#/components/messages/OutOfServiceEventMsg'
+
+  'psfusion/business-event/v010/compartment/opened':
+    description: MQTT topic on which all PS Fusion machines publish compartment-opened events.
+    publish:
+      operationId: publishCompartmentOpenedEvent
+      summary: Topic for all compartment-opened events from all PS Fusion machines
+      message:
+        $ref: '#/components/messages/CompartmentOpenedEventMsg'
+
+  'psfusion/business-event/v010/compartment/closed':
+    description: MQTT topic on which all PS Fusion machines publish compartment-closed events.
+    publish:
+      operationId: publishCompartmentClosedEvent
+      summary: Topic for all compartment-closed events from all PS Fusion machines
+      message:
+        $ref: '#/components/messages/CompartmentClosedEventMsg'
+
+  'psfusion/business-event/v010/code-scanner/switched-on':
+    description: MQTT topic on which all PS Fusion machines publish code-scanner switched-on events.
+    publish:
+      operationId: publishCodeScannerSwitchedOnEvent
+      summary: Topic for all code-scanner switched-on events from all PS Fusion machines
+      message:
+        $ref: '#/components/messages/CodeScannerSwitchedOnEventMsg'
+
+  'psfusion/business-event/v010/code-scanner/switched-off':
+    description: MQTT topic on which all PS Fusion machines publish code-scanner switched-off events.
+    publish:
+      operationId: publishCodeScannerSwitchedOffEvent
+      summary: Topic for all code-scanner switched-off events from all PS Fusion machines
+      message:
+        $ref: '#/components/messages/CodeScannerSwitchedOffEventMsg'
+
+  'psfusion/business-event/v010/code-scanner/data':
+    description: MQTT topic on which all PS Fusion machines publish code-scanner data events after successful capture.
+    publish:
+      operationId: publishCodeScannerDataEvent
+      summary: Topic for all code-scanner data events from all PS Fusion machines
+      message:
+        $ref: '#/components/messages/CodeScannerDataEventMsg'
+
+  'psfusion/business-event/v010/proximity-sensor/detected':
+    description: MQTT topic on which all PS Fusion machines publish proximity-sensor detection events.
+    publish:
+      operationId: publishProximitySensorEvent
+      summary: Topic for all proximity-sensor detection events from all PS Fusion machines
+      message:
+        $ref: '#/components/messages/ProximitySensorEventMsg'
+
+components:
+  messages:
+    AcquireLockerExclusiveLockEventMsg:
+      name: AcquireLockerExclusiveLockEventMsg
+      title: AcquireLockerExclusiveLockEventMsg
+      summary: Exclusive lock acquired.
+      description: Sent when an external or internal process has obtained exclusive control of the locker. The message is idempotent.
+      contentType: application/json
+      headers:
+        $ref: '#/components/schemas/EventHeaders'
+      x-relatedSyncOperations:
+        - acquireLockerExclusiveLock
+      payload:
+        $ref: '#/components/schemas/AcquireLockerExclusiveLockEventMsg'
+      examples:
+        - name: AcquireLockerExclusiveLockEventMsg-Example
+          headers:
+            apiVersion: 1.0.1
+            lockerId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            eventType: AcquireLockerExclusiveLockEvent
+            eventCreateUtcDateTime: '2026-03-09T10:00:01Z'
+          payload:
+            acquireLockerExclusiveLockUtcDateTime: '2026-03-09T10:00:00Z'
+
+    ReleaseLockerExclusiveLockEventMsg:
+      name: ReleaseLockerExclusiveLockEventMsg
+      title: ReleaseLockerExclusiveLockEventMsg
+      summary: Exclusive lock released.
+      description: Sent when exclusive control of the locker has been released. The message is idempotent.
+      contentType: application/json
+      headers:
+        $ref: '#/components/schemas/EventHeaders'
+      x-relatedSyncOperations:
+        - releaseLockerExclusiveLock
+      payload:
+        $ref: '#/components/schemas/ReleaseLockerExclusiveLockEventMsg'
+      examples:
+        - name: ReleaseLockerExclusiveLockEventMsg-Example
+          headers:
+            apiVersion: 1.0.1
+            lockerId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            eventType: ReleaseLockerExclusiveLockEvent
+            eventCreateUtcDateTime: '2026-03-09T10:05:01Z'
+          payload:
+            releaseLockerExclusiveLockUtcDateTime: '2026-03-09T10:05:00Z'
+
+    ExtendLockerExclusiveLockEventMsg:
+      name: ExtendLockerExclusiveLockEventMsg
+      title: ExtendLockerExclusiveLockEventMsg
+      summary: Exclusive lock extended.
+      description: Sent when exclusive control of the locker has been extended. The message is idempotent.
+      contentType: application/json
+      headers:
+        $ref: '#/components/schemas/EventHeaders'
+      x-relatedSyncOperations:
+        - extendLockerExclusiveLock
+      payload:
+        $ref: '#/components/schemas/ExtendLockerExclusiveLockEventMsg'
+      examples:
+        - name: ExtendLockerExclusiveLockEventMsg-Example
+          headers:
+            apiVersion: 1.0.1
+            lockerId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            eventType: ExtendLockerExclusiveLockEvent
+            eventCreateUtcDateTime: '2026-03-09T10:02:01Z'
+          payload:
+            extendLockerExclusiveLockUtcDateTime: '2026-03-09T10:02:00Z'
+
+    WakeupLockerEventMsg:
+      name: WakeupLockerEventMsg
+      title: WakeupLockerEventMsg
+      summary: Locker wake-up detected.
+      description: Sent when the locker has been woken from power-saving mode and is operational again. The message is idempotent.
+      contentType: application/json
+      headers:
+        $ref: '#/components/schemas/EventHeaders'
+      x-relatedSyncOperations:
+        - wakeupLocker
+      payload:
+        $ref: '#/components/schemas/WakeupLockerEventMsg'
+      examples:
+        - name: WakeupLockerEventMsg-Example
+          headers:
+            apiVersion: 1.0.1
+            lockerId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            eventType: WakeupLockerEvent
+            eventCreateUtcDateTime: '2026-03-09T10:10:01Z'
+          payload:
+            idOfTriggeringDevice: WAKEUP_BUTTON_01
+            typeOfTriggeringDevice: WAKEUP_BUTTON
+            wakeupUtcDateTime: '2026-03-09T10:10:00Z'
+
+    SleepLockerEventMsg:
+      name: SleepLockerEventMsg
+      title: SleepLockerEventMsg
+      summary: Locker sleep detected.
+      description: Sent immediately before the locker switches to power-saving mode. The message is idempotent.
+      contentType: application/json
+      headers:
+        $ref: '#/components/schemas/EventHeaders'
+      x-relatedSyncOperations:
+        - sleepLocker
+      payload:
+        $ref: '#/components/schemas/SleepLockerEventMsg'
+      examples:
+        - name: SleepLockerEventMsg-Example
+          headers:
+            apiVersion: 1.0.1
+            lockerId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            eventType: SleepLockerEvent
+            eventCreateUtcDateTime: '2026-03-09T10:15:01Z'
+          payload:
+            sleepUtcDateTime: '2026-03-09T10:15:00Z'
+
+    CommissioningEventMsg:
+      name: CommissioningEventMsg
+      title: CommissioningEventMsg
+      summary: Locker commissioning or configuration-change event.
+      description: Sent when the locker is operational again after commissioning, reboot, or a configuration change. The message is idempotent.
+      contentType: application/json
+      headers:
+        $ref: '#/components/schemas/EventHeaders'
+      x-relatedSyncOperations: []
+      payload:
+        $ref: '#/components/schemas/CommissioningEventMsg'
+      examples:
+        - name: CommissioningEventMsg-Example
+          headers:
+            apiVersion: 1.0.1
+            lockerId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            eventType: CommissioningEvent
+            eventCreateUtcDateTime: '2026-03-09T10:20:01Z'
+          payload:
+            version: '1.0.0'
+            commissioningUtcDateTime: '2026-03-09T10:20:00Z'
+
+    OutOfServiceEventMsg:
+      name: OutOfServiceEventMsg
+      title: OutOfServiceEventMsg
+      summary: Locker out-of-service event.
+      description: Sent when the locker goes temporarily out of service for technical reasons. The message is idempotent.
+      contentType: application/json
+      headers:
+        $ref: '#/components/schemas/EventHeaders'
+      x-relatedSyncOperations: []
+      payload:
+        $ref: '#/components/schemas/OutOfServiceEventMsg'
+      examples:
+        - name: OutOfServiceEventMsg-Example
+          headers:
+            apiVersion: 1.0.1
+            lockerId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            eventType: OutOfServiceEvent
+            eventCreateUtcDateTime: '2026-03-09T10:25:01Z'
+          payload:
+            reason: HARDWARE_FAULT
+            outOfServiceUtcDateTime: '2026-03-09T10:25:00Z'
+
+    CompartmentOpenedEventMsg:
+      name: CompartmentOpenedEventMsg
+      title: CompartmentOpenedEventMsg
+      summary: Compartment opened.
+      description: Sent when a compartment has been opened. The message is idempotent.
+      contentType: application/json
+      headers:
+        $ref: '#/components/schemas/EventHeaders'
+      x-relatedSyncOperations:
+        - openCompartment
+        - openCompartmentList
+      payload:
+        $ref: '#/components/schemas/CompartmentOpenedEventMsg'
+      examples:
+        - name: CompartmentOpenedEventMsg-Example
+          headers:
+            apiVersion: 1.0.1
+            lockerId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            eventType: CompartmentOpenedEvent
+            eventCreateUtcDateTime: '2026-03-09T10:30:01Z'
+          payload:
+            compartmentId: "compartmentInfo@d4e5f6a7-b8c9-0123-defa-234567890123"
+            compartmentOpenUtcDateTime: '2026-03-09T10:30:00Z'
+
+    CompartmentClosedEventMsg:
+      name: CompartmentClosedEventMsg
+      title: CompartmentClosedEventMsg
+      summary: Compartment closed.
+      description: Sent when a compartment has been closed. The message is idempotent.
+      contentType: application/json
+      headers:
+        $ref: '#/components/schemas/EventHeaders'
+      x-relatedSyncOperations:
+        - closeCompartment
+      payload:
+        $ref: '#/components/schemas/CompartmentClosedEventMsg'
+      examples:
+        - name: CompartmentClosedEventMsg-Example
+          headers:
+            apiVersion: 1.0.1
+            lockerId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            eventType: CompartmentClosedEvent
+            eventCreateUtcDateTime: '2026-03-09T10:35:01Z'
+          payload:
+            compartmentId: "compartmentInfo@d4e5f6a7-b8c9-0123-defa-234567890123"
+            compartmentCloseUtcDateTime: '2026-03-09T10:35:00Z'
+
+    CodeScannerSwitchedOnEventMsg:
+      name: CodeScannerSwitchedOnEventMsg
+      title: CodeScannerSwitchedOnEventMsg
+      summary: Code scanner switched on.
+      description: Sent when a code scanner has been switched on. The message is idempotent.
+      contentType: application/json
+      headers:
+        $ref: '#/components/schemas/EventHeaders'
+      x-relatedSyncOperations:
+        - enableCodeScanner
+      payload:
+        $ref: '#/components/schemas/CodeScannerSwitchedOnEventMsg'
+      examples:
+        - name: CodeScannerSwitchedOnEventMsg-Example
+          headers:
+            apiVersion: 1.0.1
+            lockerId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            eventType: CodeScannerSwitchedOnEvent
+            eventCreateUtcDateTime: '2026-03-09T10:40:01Z'
+          payload:
+            codeScannerId: "codeScannerInfo@e5f6a7b8-c9d0-1234-efab-345678901234"
+            codeScannerSwitchOnUtcDateTime: '2026-03-09T10:40:00Z'
+
+    CodeScannerSwitchedOffEventMsg:
+      name: CodeScannerSwitchedOffEventMsg
+      title: CodeScannerSwitchedOffEventMsg
+      summary: Code scanner switched off.
+      description: Sent when a code scanner has been switched off. The message is idempotent.
+      contentType: application/json
+      headers:
+        $ref: '#/components/schemas/EventHeaders'
+      x-relatedSyncOperations:
+        - disableCodeScanner
+      payload:
+        $ref: '#/components/schemas/CodeScannerSwitchedOffEventMsg'
+      examples:
+        - name: CodeScannerSwitchedOffEventMsg-Example
+          headers:
+            apiVersion: 1.0.1
+            lockerId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            eventType: CodeScannerSwitchedOffEvent
+            eventCreateUtcDateTime: '2026-03-09T10:45:01Z'
+          payload:
+            codeScannerId: "codeScannerInfo@e5f6a7b8-c9d0-1234-efab-345678901234"
+            codeScannerSwitchOffUtcDateTime: '2026-03-09T10:45:00Z'
+
+    CodeScannerDataEventMsg:
+      name: CodeScannerDataEventMsg
+      title: CodeScannerDataEventMsg
+      summary: Code scanner data captured.
+      description: Sent when a code scanner has captured raw data. Business interpretation of the scanned data happens outside the scanner.
+      contentType: application/json
+      headers:
+        $ref: '#/components/schemas/EventHeaders'
+      x-relatedSyncOperations:
+        - enableCodeScanner
+      payload:
+        $ref: '#/components/schemas/CodeScannerDataEventMsg'
+      examples:
+        - name: CodeScannerDataEventMsg-Example
+          headers:
+            apiVersion: 1.0.1
+            lockerId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            eventType: CodeScannerDataEvent
+            eventCreateUtcDateTime: '2026-03-09T10:50:01Z'
+          payload:
+            codeScannerId: "codeScannerInfo@e5f6a7b8-c9d0-1234-efab-345678901234"
+            codeScannerRawData: UVI6MTIzNDU2Nzg5MA==
+            codeScannerDateCode: QR
+            codeScannerDataUtcDateTime: '2026-03-09T10:50:00Z'
+
+    ProximitySensorEventMsg:
+      name: ProximitySensorEventMsg
+      title: ProximitySensorEventMsg
+      summary: Proximity detection captured.
+      description: Sent when a proximity sensor has detected an object. If the locker is asleep, sending may be delayed until after wake-up.
+      contentType: application/json
+      headers:
+        $ref: '#/components/schemas/EventHeaders'
+      x-relatedSyncOperations: []
+      payload:
+        $ref: '#/components/schemas/ProximitySensorEventMsg'
+      examples:
+        - name: ProximitySensorEventMsg-Example
+          headers:
+            apiVersion: 1.0.1
+            lockerId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            eventType: ProximitySensorEvent
+            eventCreateUtcDateTime: '2026-03-09T10:55:01Z'
+          payload:
+            proximitySensorId: "proximitySensorInfo@b2c3d4e5-f6a7-8901-bcde-f12345678901"
+            proximitySensorDetectionUtcDateTime: '2026-03-09T10:55:00Z'
+
+  schemas:
+    EventHeaders:
+      type: object
+      required:
+        - apiVersion
+        - lockerId
+        - eventType
+        - eventCreateUtcDateTime
+      properties:
+        apiVersion:
+          type: string
+          description: Required header containing the API version used for communication between backend and machine.
+          example: 1.0.1
+        lockerId:
+          $ref: '#/components/schemas/LockerIdTo'
+        eventType:
+          type: string
+          description: Type of event.
+        eventCreateUtcDateTime:
+          type: string
+          format: date-time
+          description: Event generation timestamp (UTC).
+          example: '2026-03-09T10:00:01Z'
+
+    LockerIdTo:
+      type: string
+      format: uuid
+      description: >-
+        Business key of the machine as a UUID.
+        It is assigned by the PS backend during commissioning and is immutable.
+        If supplied by the caller, the API MAY validate it against the locally
+        configured machine identity.
+      example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+
+    CompartmentIdTo:
+      type: string
+      pattern: '^compartmentInfo@[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      description: >-
+        Business identifier of a compartment, assigned as a UUID during
+        commissioning. The ID is permanently bound to a physical location
+        within the locker. On hardware replacement, the recommissioning
+        process reassigns the original ID to the same physical slot.
+      example: "compartmentInfo@d4e5f6a7-b8c9-0123-defa-234567890123"
+
+    CodeScannerIdTo:
+      type: string
+      pattern: '^codeScannerInfo@[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      description: Business identifier of a code scanner.
+      example: "codeScannerInfo@e5f6a7b8-c9d0-1234-efab-345678901234"
+
+    ProximitySensorIdTo:
+      type: string
+      pattern: '^proximitySensorInfo@[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      description: Business identifier of a proximity sensor.
+      example: "proximitySensorInfo@b2c3d4e5-f6a7-8901-bcde-f12345678901"
+
+    AudioSpeakerIdTo:
+      type: string
+      pattern: '^audioSpeakerInfo@[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      description: Business identifier of an audio speaker.
+      example: "audioSpeakerInfo@f6a7b8c9-d0e1-2345-fabc-456789012345"
+
+    CommandUniqueNumberTo:
+      type: string
+      format: uuid
+      description: Unique number of a command.
+      example: "0c311e5a-6e6d-4d93-9e1c-0c0f7e48c8f1"
+
+    ControllerModuleIdTo:
+      type: string
+      pattern: '^controllerModuleInfo@[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      description: Business identifier of a controller module.
+      example: "controllerModuleInfo@c9d0e1f2-a3b4-5678-cdef-789012345678"
+
+    LightingUnitIdTo:
+      type: string
+      pattern: '^lightingUnitInfo@[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      description: Business identifier of a lighting unit.
+      example: "lightingUnitInfo@c3d4e5f6-a7b8-9012-cdef-123456789012"
+
+    StandardModuleIdTo:
+      type: string
+      pattern: '^standardModuleInfo@[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      description: Business identifier of a standard module.
+      example: "standardModuleInfo@b8c9d0e1-f2a3-4567-bcde-678901234567"
+
+    TouchscreenIdTo:
+      type: string
+      pattern: '^touchscreenInfo@[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      description: Business identifier of a touchscreen.
+      example: "touchscreenInfo@a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+    WakeupButtonIdTo:
+      type: string
+      pattern: '^wakeupButtonInfo@[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      description: Business identifier of a wake-up button.
+      example: "wakeupButtonInfo@a7b8c9d0-e1f2-3456-abcd-567890123456"
+
+    CodeScannerCodesEnum:
+      type: string
+      enum:
+        - EAN8
+        - EAN13
+        - UPC_A
+        - UPC_E
+        - CODE39
+        - CODE25_INTERLEAVED
+        - CODE25_NORMAL_5_BARS
+        - CODE25_INDUSTRIAL
+        - CODE25_MATRIX_3_BARS
+        - CODE25_CIP_HR
+        - CODABAR_STANDARD
+        - CODABAR_ASCII
+        - CODE128
+        - EAN128
+        - CODE93
+        - CODABLOCK_A
+        - CODABLOCK_F
+        - MSI
+        - PLESSEY
+        - TELEPEN
+        - DELTA_IBM
+        - CODE11
+        - CODE16K
+        - CODE49
+        - CODE_PDF417
+        - CODE_ISBT128
+        - CODE_DATA_MATRIX
+        - QR
+
+    AcquireLockerExclusiveLockEventMsg:
+      type: object
+      required:
+        - acquireLockerExclusiveLockUtcDateTime
+      properties:
+        acquireLockerExclusiveLockUtcDateTime:
+          type: string
+          format: date-time
+          example: '2026-03-09T10:00:00Z'
+
+    ReleaseLockerExclusiveLockEventMsg:
+      type: object
+      required:
+        - releaseLockerExclusiveLockUtcDateTime
+      properties:
+        releaseLockerExclusiveLockUtcDateTime:
+          type: string
+          format: date-time
+          example: '2026-03-09T10:05:00Z'
+
+    ExtendLockerExclusiveLockEventMsg:
+      type: object
+      required:
+        - extendLockerExclusiveLockUtcDateTime
+      properties:
+        extendLockerExclusiveLockUtcDateTime:
+          type: string
+          format: date-time
+          example: '2026-03-09T10:02:00Z'
+
+    WakeupLockerEventMsg:
+      type: object
+      required:
+        - typeOfTriggeringDevice
+        - wakeupUtcDateTime
+      properties:
+        idOfTriggeringDevice:
+          type: string
+          description: Identifier of the device that triggered the wake-up.
+          example: WAKEUP_BUTTON_01
+        typeOfTriggeringDevice:
+          type: string
+          description: Field name reflects the current Java model.
+          example: WAKEUP_BUTTON
+        wakeupUtcDateTime:
+          type: string
+          format: date-time
+          example: '2026-03-09T10:10:00Z'
+
+    SleepLockerEventMsg:
+      type: object
+      required:
+        - sleepUtcDateTime
+      properties:
+        sleepUtcDateTime:
+          type: string
+          format: date-time
+          example: '2026-03-09T10:15:00Z'
+
+    CommissioningEventMsg:
+      type: object
+      required:
+        - version
+        - commissioningUtcDateTime
+      properties:
+        version:
+          type: string
+          description: Locker software version or configuration version after commissioning or later configuration changes.
+          example: '1.0.0'
+        commissioningUtcDateTime:
+          type: string
+          format: date-time
+          example: '2026-03-09T10:20:00Z'
+
+    OutOfServiceEventMsg:
+      type: object
+      required:
+        - reason
+        - outOfServiceUtcDateTime
+      properties:
+        reason:
+          type: string
+          example: HARDWARE_FAULT
+        outOfServiceUtcDateTime:
+          type: string
+          format: date-time
+          example: '2026-03-09T10:25:00Z'
+
+    CompartmentOpenedEventMsg:
+      type: object
+      required:
+        - compartmentId
+        - compartmentOpenUtcDateTime
+      properties:
+        compartmentId:
+          $ref: '#/components/schemas/CompartmentIdTo'
+        compartmentOpenUtcDateTime:
+          type: string
+          format: date-time
+          example: '2026-03-09T10:30:00Z'
+
+    CompartmentClosedEventMsg:
+      type: object
+      required:
+        - compartmentId
+        - compartmentCloseUtcDateTime
+      properties:
+        compartmentId:
+          $ref: '#/components/schemas/CompartmentIdTo'
+        compartmentCloseUtcDateTime:
+          type: string
+          format: date-time
+          example: '2026-03-09T10:35:00Z'
+
+    CodeScannerSwitchedOnEventMsg:
+      type: object
+      required:
+        - codeScannerId
+        - codeScannerSwitchOnUtcDateTime
+      properties:
+        codeScannerId:
+          $ref: '#/components/schemas/CodeScannerIdTo'
+        codeScannerSwitchOnUtcDateTime:
+          type: string
+          format: date-time
+          example: '2026-03-09T10:40:00Z'
+
+    CodeScannerSwitchedOffEventMsg:
+      type: object
+      required:
+        - codeScannerId
+        - codeScannerSwitchOffUtcDateTime
+      properties:
+        codeScannerId:
+          $ref: '#/components/schemas/CodeScannerIdTo'
+        codeScannerSwitchOffUtcDateTime:
+          type: string
+          format: date-time
+          example: '2026-03-09T10:45:00Z'
+
+    CodeScannerDataEventMsg:
+      type: object
+      required:
+        - codeScannerId
+        - codeScannerRawData
+        - codeScannerDateCode
+        - codeScannerDataUtcDateTime
+      properties:
+        codeScannerId:
+          $ref: '#/components/schemas/CodeScannerIdTo'
+        codeScannerRawData:
+          type: string
+          format: byte
+          description: Raw scan data, Base64-encoded.
+          example: UVI6MTIzNDU2Nzg5MA==
+        codeScannerDateCode:
+          allOf:
+            - $ref: '#/components/schemas/CodeScannerCodesEnum'
+          description: Field name reflects the current Java model.
+        codeScannerDataUtcDateTime:
+          type: string
+          format: date-time
+          example: '2026-03-09T10:50:00Z'
+
+    ProximitySensorEventMsg:
+      type: object
+      required:
+        - proximitySensorId
+        - proximitySensorDetectionUtcDateTime
+      properties:
+        proximitySensorId:
+          $ref: '#/components/schemas/ProximitySensorIdTo'
+        proximitySensorDetectionUtcDateTime:
+          type: string
+          format: date-time
+          example: '2026-03-09T10:55:00Z'
