@@ -13,6 +13,7 @@ services:
 
   mosquitto:
     image: eclipse-mosquitto:2
+    user: root
     depends_on:
       cert-init:
         condition: service_completed_successfully
@@ -25,7 +26,7 @@ services:
       - locker-net
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "mosquitto_sub -h localhost -p 8883 --cafile /mosquitto/certs/ca.crt --cert /mosquitto/certs/broker.crt --key /mosquitto/certs/broker.key -t '$$SYS/broker/uptime' -C 1 -W 2"]
+      test: ["CMD-SHELL", "mosquitto_sub -h localhost -p 8883 --cafile /mosquitto/certs/ca.crt --cert /mosquitto/certs/mosquitto.crt --key /mosquitto/certs/mosquitto.key -t '$$SYS/broker/uptime' -C 1 -W 2"]
       interval: 5s
       timeout: 3s
       retries: 10

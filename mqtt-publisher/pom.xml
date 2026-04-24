@@ -15,6 +15,13 @@
         <paho.version>1.2.5</paho.version>
     </properties>
 
+    <repositories>
+        <repository>
+            <id>maven-central-direct</id>
+            <url>https://repo.maven.apache.org/maven2</url>
+        </repository>
+    </repositories>
+
     <dependencies>
         <dependency>
             <groupId>com.example.locker</groupId>

@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OUT="${CERT_OUT_DIR:-$SCRIPT_DIR/../certs}"
 PASSWORD="changeit"
 
-SERVICES=(broker rest-server rest-client mqtt-publisher mqtt-subscriber)
+SERVICES=(mosquitto rest-server rest-client mqtt-publisher mqtt-subscriber)
 
 if [ -f "$OUT/ca.crt" ] && [ "${FORCE:-0}" != "1" ]; then
   echo "[gen-certs] Certificates already exist in $OUT — skipping (set FORCE=1 to regenerate)."
@@ -79,3 +79,7 @@ keytool -importcert -storetype PKCS12 \
 
 echo "[gen-certs] Done. Files in $OUT:"
 ls -la "$OUT"
+
+# Make all files readable (Mosquitto runs as non-root)
+chmod 644 "$OUT"/*.key "$OUT"/*.crt "$OUT"/*.p12 2>/dev/null || true
+

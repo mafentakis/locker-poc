@@ -57,7 +57,7 @@ public final class SubscriberMain {
                 LOG.info("Received event topic=" + t + " payload=" + payload);
                 try {
                     var mapper = JsonMapper.instance();
-                    var envelope = mapper.readValue(payload,
+                    EventEnvelope<CompartmentOpenedEventMsg> envelope = mapper.readValue(payload,
                             mapper.getTypeFactory().constructParametricType(
                                     EventEnvelope.class, CompartmentOpenedEventMsg.class));
                     LOG.info("Deserialized: headers=" + envelope.headers() + " payload=" + envelope.payload());

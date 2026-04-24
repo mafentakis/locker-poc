@@ -1,6 +1,6 @@
-FROM eclipse-temurin:21-jdk-alpine
+FROM eclipse-temurin:21-jdk
 
-RUN apk add --no-cache openssl bash
+RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 
 COPY scripts/gen-certs.sh /scripts/gen-certs.sh
 RUN chmod +x /scripts/gen-certs.sh

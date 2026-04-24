@@ -43,3 +43,9 @@ certs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Corporate proxy certs (machine-specific, not committed)
+docker/proxy-certs/
+
+# Maven settings with credentials (machine-specific, not committed)
+docker/maven-settings.xml
