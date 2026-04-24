@@ -1,0 +1,160 @@
+services:
+
+  cert-init:
+    build:
+      context: .
+      dockerfile: cert-init/Dockerfile
+    volumes:
+      - ./certs:/out
+      - ./scripts:/scripts:ro
+    networks:
+      - locker-net
+    restart: "no"
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    depends_on:
+      cert-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./certs:/mosquitto/certs:ro
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      - "8883:8883"
+    networks:
+      - locker-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h localhost -p 8883 --cafile /mosquitto/certs/ca.crt --cert /mosquitto/certs/broker.crt --key /mosquitto/certs/broker.key -t '$$SYS/broker/uptime' -C 1 -W 2"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  rest-server:
+    build:
+      context: .
+      dockerfile: rest-server/Dockerfile
+    depends_on:
+      cert-init:
+        condition: service_completed_successfully
+      mosquitto:
+        condition: service_healthy
+    volumes:
+      - ./certs:/certs:ro
+    ports:
+      - "8443:8443"
+    networks:
+      - locker-net
+    restart: unless-stopped
+    environment:
+      TLS_KEYSTORE_PATH: /certs/rest-server-keystore.p12
+      TLS_KEYSTORE_PASSWORD: changeit
+      TLS_TRUSTSTORE_PATH: /certs/truststore.p12
+      TLS_TRUSTSTORE_PASSWORD: changeit
+      HTTPS_BIND: "0.0.0.0:8443"
+      MQTT_BROKER_URI: ssl://mosquitto:8883
+      MQTT_CLIENT_ID: rest-server
+      MQTT_TOPIC_OPENED: psfusion/business-event/v010/compartment/opened
+      LOCKER_ID: f47ac10b-58cc-4372-a567-0e02b2c3d479
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS --cacert /certs/ca.crt --cert /certs/rest-server.crt --key /certs/rest-server.key https://localhost:8443/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  mqtt-subscriber:
+    build:
+      context: .
+      dockerfile: mqtt-subscriber/Dockerfile
+    depends_on:
+      cert-init:
+        condition: service_completed_successfully
+      mosquitto:
+        condition: service_healthy
+    volumes:
+      - ./certs:/certs:ro
+    networks:
+      - locker-net
+    restart: unless-stopped
+    environment:
+      TLS_KEYSTORE_PATH: /certs/mqtt-subscriber-keystore.p12
+      TLS_KEYSTORE_PASSWORD: changeit
+      TLS_TRUSTSTORE_PATH: /certs/truststore.p12
+      TLS_TRUSTSTORE_PASSWORD: changeit
+      MQTT_BROKER_URI: ssl://mosquitto:8883
+      MQTT_CLIENT_ID: mqtt-subscriber
+      MQTT_TOPIC_OPENED: psfusion/business-event/v010/compartment/opened
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/mqtt-subscriber.ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  rest-client:
+    build:
+      context: .
+      dockerfile: rest-client/Dockerfile
+    depends_on:
+      rest-server:
+        condition: service_healthy
+      mqtt-subscriber:
+        condition: service_healthy
+    volumes:
+      - ./certs:/certs:ro
+    networks:
+      - locker-net
+    restart: "no"
+    environment:
+      TLS_KEYSTORE_PATH: /certs/rest-client-keystore.p12
+      TLS_KEYSTORE_PASSWORD: changeit
+      TLS_TRUSTSTORE_PATH: /certs/truststore.p12
+      TLS_TRUSTSTORE_PASSWORD: changeit
+      SERVER_URL: https://rest-server:8443
+      LOCKER_ID: f47ac10b-58cc-4372-a567-0e02b2c3d479
+      COMPARTMENT_ID: "compartmentInfo@d4e5f6a7-b8c9-0123-defa-234567890123"
+      API_VERSION: v010
+      CLIENT_VERSION: "1.2.6"
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/rest-client.done"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 2s
+
+  mqtt-publisher:
+    build:
+      context: .
+      dockerfile: mqtt-publisher/Dockerfile
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      mqtt-subscriber:
+        condition: service_healthy
+    volumes:
+      - ./certs:/certs:ro
+    networks:
+      - locker-net
+    restart: "no"
+    environment:
+      TLS_KEYSTORE_PATH: /certs/mqtt-publisher-keystore.p12
+      TLS_KEYSTORE_PASSWORD: changeit
+      TLS_TRUSTSTORE_PATH: /certs/truststore.p12
+      TLS_TRUSTSTORE_PASSWORD: changeit
+      MQTT_BROKER_URI: ssl://mosquitto:8883
+      MQTT_CLIENT_ID: mqtt-publisher
+      MQTT_TOPIC_OPENED: psfusion/business-event/v010/compartment/opened
+      LOCKER_ID: f47ac10b-58cc-4372-a567-0e02b2c3d479
+      COMPARTMENT_ID: "compartmentInfo@d4e5f6a7-b8c9-0123-defa-234567890123"
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/mqtt-publisher.done"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 2s
+
+networks:
+  locker-net:
+    driver: bridge
