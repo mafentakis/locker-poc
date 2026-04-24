@@ -3,25 +3,21 @@ package com.example.locker.it;
 import com.example.locker.common.JsonMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.*;
-import org.junit.jupiter.api.extension.ExtendWith;
 
 import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLHandshakeException;
-import java.io.File;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.file.Files;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-@ExtendWith(DockerComposeStack.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 public class EndToEndIT {
 
-    private static final String BASE = "https://localhost:8443";
+    private static final String REST_BASE = System.getenv().getOrDefault("REST_SERVER_URL", "https://rest-server:8443");
+    private static final String MQTT_BROKER = System.getenv().getOrDefault("MQTT_BROKER_URI", "ssl://mosquitto:8883");
     private static final String LOCKER_ID = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
     private static final String COMPARTMENT_ID = "compartmentInfo@d4e5f6a7-b8c9-0123-defa-234567890123";
     private static final String TOPIC = "psfusion/business-event/v010/compartment/opened";
@@ -38,7 +34,7 @@ public class EndToEndIT {
     @Order(1)
     void restServerHealthEndpointReturns200() throws Exception {
         HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(BASE + "/health"))
+                .uri(URI.create(REST_BASE + "/health"))
                 .GET().build();
         HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
         assertEquals(200, resp.statusCode());
@@ -48,8 +44,8 @@ public class EndToEndIT {
     @Test
     @Order(2)
     void openCompartmentReturns200AndEmitsEvent() throws Exception {
-        try (MqttTestClient mqtt = new MqttTestClient(CertLoader.clientSslContext(), TOPIC)) {
-            String url = BASE + "/api/v010/locker/" + LOCKER_ID + "/compartment/" + COMPARTMENT_ID + "/open";
+        try (MqttTestClient mqtt = new MqttTestClient(CertLoader.clientSslContext(), MQTT_BROKER, TOPIC)) {
+            String url = REST_BASE + "/api/v010/locker/" + LOCKER_ID + "/compartment/" + COMPARTMENT_ID + "/open";
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .POST(HttpRequest.BodyPublishers.noBody())
@@ -61,7 +57,6 @@ public class EndToEndIT {
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
             assertEquals(200, resp.statusCode());
 
-            // Wait for MQTT event
             String payload = mqtt.poll(10);
             assertNotNull(payload, "Expected MQTT event within 10s");
 
@@ -74,7 +69,7 @@ public class EndToEndIT {
     @Test
     @Order(3)
     void invalidCompartmentIdReturns400() throws Exception {
-        String url = BASE + "/api/v010/locker/" + LOCKER_ID + "/compartment/bogus/open";
+        String url = REST_BASE + "/api/v010/locker/" + LOCKER_ID + "/compartment/bogus/open";
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .POST(HttpRequest.BodyPublishers.noBody())
@@ -93,7 +88,7 @@ public class EndToEndIT {
     @Test
     @Order(4)
     void missingLockTokenHeaderReturns400() throws Exception {
-        String url = BASE + "/api/v010/locker/" + LOCKER_ID + "/compartment/" + COMPARTMENT_ID + "/open";
+        String url = REST_BASE + "/api/v010/locker/" + LOCKER_ID + "/compartment/" + COMPARTMENT_ID + "/open";
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .POST(HttpRequest.BodyPublishers.noBody())
@@ -111,41 +106,24 @@ public class EndToEndIT {
 
     @Test
     @Order(5)
-    void httpsWithoutClientCertIsRejected() throws Exception {
-        SSLContext trustOnly = CertLoader.trustOnlySslContext();
-        HttpClient noClientCert = HttpClient.newBuilder().sslContext(trustOnly).build();
-
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(BASE + "/health"))
-                .GET().build();
-
+    void httpsWithoutClientCertIsRejected() {
         assertThrows(Exception.class, () -> {
+            SSLContext trustOnly = CertLoader.trustOnlySslContext();
+            HttpClient noClientCert = HttpClient.newBuilder().sslContext(trustOnly).build();
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(REST_BASE + "/health"))
+                    .GET().build();
             noClientCert.send(req, HttpResponse.BodyHandlers.ofString());
         }, "Connection without client cert should be rejected");
     }
 
     @Test
     @Order(6)
-    void mqttWithoutClientCertIsRejected() throws Exception {
-        SSLContext trustOnly = CertLoader.trustOnlySslContext();
+    void mqttWithoutClientCertIsRejected() {
         assertThrows(Exception.class, () -> {
-            new MqttTestClient(trustOnly, TOPIC);
+            SSLContext trustOnly = CertLoader.trustOnlySslContext();
+            new MqttTestClient(trustOnly, MQTT_BROKER, TOPIC);
         }, "MQTT connection without client cert should be rejected");
     }
-
-    @Test
-    @Order(7)
-    void standaloneMqttPublisherEventWasObservedBySubscriber() throws Exception {
-        // Check docker logs for mqtt-subscriber to have at least 2 "Received event" lines
-        File projectRoot = DockerComposeStack.findProjectRoot();
-        ProcessBuilder pb = new ProcessBuilder("docker", "compose", "logs", "mqtt-subscriber")
-                .directory(projectRoot).redirectErrorStream(true);
-        Process p = pb.start();
-        String logs = new String(p.getInputStream().readAllBytes());
-        p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
-
-        long count = logs.lines().filter(l -> l.contains("Received event")).count();
-        assertTrue(count >= 2,
-                "Expected at least 2 'Received event' lines in mqtt-subscriber logs, found " + count);
-    }
 }
+

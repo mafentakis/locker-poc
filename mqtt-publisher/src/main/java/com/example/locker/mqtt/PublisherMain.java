@@ -11,6 +11,8 @@ import org.eclipse.paho.mqttv5.client.MqttConnectionOptions;
 import org.eclipse.paho.mqttv5.client.persist.MemoryPersistence;
 import org.eclipse.paho.mqttv5.common.MqttMessage;
 
+import com.example.locker.common.LogConfig;
+
 import javax.net.ssl.SSLContext;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -21,8 +23,7 @@ public final class PublisherMain {
     private static final Logger LOG = Logger.getLogger(PublisherMain.class.getName());
 
     public static void main(String[] args) throws Exception {
-        System.setProperty("java.util.logging.config.file",
-                PublisherMain.class.getClassLoader().getResource("logging.properties").getPath());
+        LogConfig.init();
 
         String brokerUri = System.getenv().getOrDefault("MQTT_BROKER_URI", "ssl://localhost:8883");
         String clientId = System.getenv().getOrDefault("MQTT_CLIENT_ID", "mqtt-publisher");

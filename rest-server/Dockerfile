@@ -1,9 +1,9 @@
 FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /src
-COPY pom.xml ./
 COPY common/ common/
+RUN mvn -f common/pom.xml install -DskipTests -q
 COPY rest-server/ rest-server/
-RUN mvn -pl rest-server -am package -DskipTests -q
+RUN mvn -f rest-server/pom.xml package -DskipTests -q
 
 FROM eclipse-temurin:21-jre
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*

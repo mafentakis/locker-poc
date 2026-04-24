@@ -15,7 +15,8 @@
 | 8 | `rest-client` | ✅ Done | 0ef384c | 2026-04-24 |
 | 9 | `docker-compose.yml` final wiring | ✅ Done | f3aa5c8 | 2026-04-24 |
 | 10 | `integration-test` module | ✅ Done | 96160ab | 2026-04-24 |
-| 11 | README quick-start verification + progress log update | ✅ Done | — | 2026-04-24 |
+| 11 | README quick-start verification + progress log update | ✅ Done | 74fa01c | 2026-04-24 |
+| R1 | Refactor: standalone POMs + independent Dockerfiles + Dockerized IT | ✅ Done | — | 2026-04-24 |
 
 ---
 
@@ -66,3 +67,15 @@
 - `CertLoader`: loads client certs from `./certs`
 - `MqttTestClient`: simple subscriber for test assertions
 - 7 test cases: health, happy path + event, invalid compartment, missing header, no-client-cert HTTPS, no-client-cert MQTT, standalone publisher verification
+
+### 2026-04-24 — Refactor R1: Independent Docker builds + Dockerized integration test
+- **All module POMs made standalone** — removed `<parent>`, inlined versions/properties/plugins. Root `pom.xml` is now an optional aggregator for IDE use only.
+- **Each Dockerfile copies only `common/` + its own module** — `mvn -f common/pom.xml install` then `mvn -f <module>/pom.xml package`. No cross-module knowledge.
+- **Integration test now runs in Docker** — new `integration-test/Dockerfile`, added as compose service with `depends_on` on healthy `rest-server`, `mosquitto`, `mqtt-subscriber`.
+- **IT classes moved from `src/test/java` to `src/main/java`** — shaded into runnable JAR with `TestRunnerMain` that launches JUnit programmatically.
+- **Removed `DockerComposeStack.java`** — no longer needed; compose is the orchestrator.
+- **`MqttTestClient` takes `brokerUri` parameter** — connects via Docker DNS, not localhost.
+- **`CertLoader` uses `CERTS_DIR` env var** — defaults to `/certs` (Docker mount).
+- **`EndToEndIT` uses `REST_SERVER_URL` and `MQTT_BROKER_URI` env vars** — defaults to Docker service names.
+- Run everything: `docker compose up --build`
+- View test results: `docker compose logs integration-test`

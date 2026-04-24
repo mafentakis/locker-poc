@@ -1,5 +1,6 @@
 package com.example.locker.server;
 
+import com.example.locker.common.LogConfig;
 import com.example.locker.common.tls.TlsContextFactory;
 import com.sun.net.httpserver.HttpsConfigurator;
 import com.sun.net.httpserver.HttpsParameters;
@@ -10,15 +11,13 @@ import javax.net.ssl.SSLParameters;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.util.logging.Logger;
 
 public final class RestServerMain {
 
-    private static final Logger LOG = Logger.getLogger(RestServerMain.class.getName());
+    private static final java.util.logging.Logger LOG = java.util.logging.Logger.getLogger(RestServerMain.class.getName());
 
     public static void main(String[] args) throws Exception {
-        System.setProperty("java.util.logging.config.file",
-                RestServerMain.class.getClassLoader().getResource("logging.properties").getPath());
+        LogConfig.init();
 
         String bind = System.getenv().getOrDefault("HTTPS_BIND", "0.0.0.0:8443");
         String[] parts = bind.split(":");

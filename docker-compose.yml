@@ -117,12 +117,6 @@ services:
       COMPARTMENT_ID: "compartmentInfo@d4e5f6a7-b8c9-0123-defa-234567890123"
       API_VERSION: v010
       CLIENT_VERSION: "1.2.6"
-    healthcheck:
-      test: ["CMD", "test", "-f", "/tmp/rest-client.done"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-      start_period: 2s
 
   mqtt-publisher:
     build:
@@ -148,12 +142,31 @@ services:
       MQTT_TOPIC_OPENED: psfusion/business-event/v010/compartment/opened
       LOCKER_ID: f47ac10b-58cc-4372-a567-0e02b2c3d479
       COMPARTMENT_ID: "compartmentInfo@d4e5f6a7-b8c9-0123-defa-234567890123"
-    healthcheck:
-      test: ["CMD", "test", "-f", "/tmp/mqtt-publisher.done"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-      start_period: 2s
+
+  integration-test:
+    build:
+      context: .
+      dockerfile: integration-test/Dockerfile
+    depends_on:
+      rest-server:
+        condition: service_healthy
+      mqtt-subscriber:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+    volumes:
+      - ./certs:/certs:ro
+    networks:
+      - locker-net
+    restart: "no"
+    environment:
+      TLS_KEYSTORE_PATH: /certs/rest-client-keystore.p12
+      TLS_KEYSTORE_PASSWORD: changeit
+      TLS_TRUSTSTORE_PATH: /certs/truststore.p12
+      TLS_TRUSTSTORE_PASSWORD: changeit
+      CERTS_DIR: /certs
+      REST_SERVER_URL: https://rest-server:8443
+      MQTT_BROKER_URI: ssl://mosquitto:8883
 
 networks:
   locker-net:

@@ -1,6 +1,7 @@
 package com.example.locker.client;
 
 import com.example.locker.common.HealthFile;
+import com.example.locker.common.LogConfig;
 import com.example.locker.common.tls.TlsContextFactory;
 
 import javax.net.ssl.SSLContext;
@@ -16,8 +17,7 @@ public final class RestClientMain {
     private static final Logger LOG = Logger.getLogger(RestClientMain.class.getName());
 
     public static void main(String[] args) throws Exception {
-        System.setProperty("java.util.logging.config.file",
-                RestClientMain.class.getClassLoader().getResource("logging.properties").getPath());
+        LogConfig.init();
 
         String serverUrl = System.getenv().getOrDefault("SERVER_URL", "https://rest-server:8443");
         String lockerId = System.getenv().getOrDefault("LOCKER_ID", "f47ac10b-58cc-4372-a567-0e02b2c3d479");

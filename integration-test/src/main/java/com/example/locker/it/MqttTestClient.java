@@ -12,20 +12,17 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
-/**
- * Simple MQTT subscriber that collects messages into a queue for test assertions.
- */
 public final class MqttTestClient implements AutoCloseable {
 
     private final MqttAsyncClient client;
     private final BlockingQueue<String> messages = new LinkedBlockingQueue<>();
 
-    public MqttTestClient(SSLContext sslContext, String topic) throws Exception {
+    public MqttTestClient(SSLContext sslContext, String brokerUri, String topic) throws Exception {
         MqttConnectionOptions opts = new MqttConnectionOptions();
         opts.setSocketFactory(sslContext.getSocketFactory());
         opts.setCleanStart(true);
 
-        client = new MqttAsyncClient("ssl://localhost:8883",
+        client = new MqttAsyncClient(brokerUri,
                 "it-test-" + System.nanoTime(), new MemoryPersistence());
 
         client.setCallback(new MqttCallback() {
@@ -55,3 +52,4 @@ public final class MqttTestClient implements AutoCloseable {
         client.close();
     }
 }
+
