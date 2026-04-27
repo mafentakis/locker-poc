@@ -42,133 +42,22 @@ Minimal **Java 21** Proof-of-Concept demonstrating secure, framework-free commun
 
 ```text
 locker-poc/
+├── common/             # shared DTOs and TLS helpers
+├── integration-test/   # JUnit 5 end-to-end tests around docker compose
+├── mosquitto/          # TLS-enabled Mosquitto image and config
+├── mqtt-publisher/     # standalone MQTT test publisher
+├── mqtt-subscriber/    # MQTT event subscriber
+├── parent-pom/         # shared Maven dependency and plugin versions
+├── rest-client/        # one-shot HTTPS client for openCompartment
+├── rest-server/        # HTTPS server and MQTT event emitter
+├── scripts/            # certificate generation helpers
 ├── docker-compose.yml
+├── pom.xml             # aggregator
 ├── README.md
-├── SPEC.md
-├── .gitignore
-├── certs/                              # generated at build time, git-ignored
-│   ├── ca.crt                          # self-signed root CA
-│   ├── broker.{crt,key}                # mosquitto server cert
-│   ├── rest-server.{crt,key}           # HTTPS server cert
-│   ├── rest-client.{crt,key}           # HTTPS client cert
-│   ├── mqtt-publisher.{crt,key}
-│   ├── mqtt-subscriber.{crt,key}
-│   ├── truststore.p12                  # contains ca.crt (Java)
-│   └── *-keystore.p12                  # per-service key+cert bundle (Java)
-├── scripts/
-│   └── gen-certs.sh                    # openssl: creates CA + leaf certs + PKCS#12 stores
-├── mosquitto/
-│   ├── Dockerfile
-│   └── mosquitto.conf                  # 8883 TLS, require_certificate true
-├── parent-pom/
-│   └── pom.xml                         # shared dependency versions + Java 21
-├── common/                             # shared DTOs & TLS helpers
-│   ├── pom.xml
-│   └── src/main/java/com/example/locker/common/
-│       ├── dto/OpenCompartmentCommand.java
-│       ├── dto/CompartmentOpenedEventMsg.java
-│       ├── dto/EventHeaders.java
-│       ├── dto/ErrorResponseTo.java
-│       └── tls/TlsContextFactory.java
-├── rest-server/                        # HTTPS server + MQTT publisher
-│   ├── Dockerfile
-│   ├── pom.xml
-│   └── src/main/java/com/example/locker/server/
-│       ├── RestServerMain.java
-│       ├── OpenCompartmentHandler.java
-│       └── MqttEventEmitter.java
-├── rest-client/                        # sends openCompartment over HTTPS
-│   ├── Dockerfile
-│   ├── pom.xml
-│   └── src/main/java/com/example/locker/client/RestClientMain.java
-├── mqtt-publisher/                     # standalone test publisher
-│   ├── Dockerfile
-│   ├── pom.xml
-│   └── src/main/java/com/example/locker/mqtt/PublisherMain.java
-├── mqtt-subscriber/                    # listens on compartment/opened topic
-│   ├── Dockerfile
-│   ├── pom.xml
-│   └── src/main/java/com/example/locker/mqtt/SubscriberMain.java
-├── integration-test/                   # JUnit 5 end-to-end test driving docker compose
-│   ├── pom.xml
-│   └── src/test/java/com/example/locker/it/
-│       ├── DockerComposeStack.java
-│       ├── CertLoader.java
-│       ├── MqttTestClient.java
-│       └── EndToEndIT.java
-└── pom.xml                             # aggregator
+└── SPEC.md
 ```
 
----
-
-## System diagram
-
-```mermaid
-flowchart LR
-    subgraph host["Developer host — Docker Compose (network: locker-net)"]
-        direction LR
-
-        certs[("./certs\nshared volume\n(CA + leaf certs + P12)")]:::vol
-
-        subgraph init["cert-init (one-shot)"]
-            gen["openssl via gen-certs.sh"]
-        end
-
-        subgraph broker["mosquitto (container)"]
-            mos["Mosquitto 2.x\nTLS :8883\nrequire_certificate=true"]
-        end
-
-        subgraph srv["rest-server (container)"]
-            rs["Java 21 HttpsServer\nPOST /api/v010/locker/{lockerId}/compartment/{compartmentId}/open"]
-            emit["Paho MQTTv5 publisher\ntopic: psfusion/business-event/v010/compartment/opened"]
-        end
-
-        subgraph cli["rest-client (container)"]
-            rc["Java 21 HttpClient\nmTLS → rest-server"]
-        end
-
-        subgraph sub["mqtt-subscriber (container)"]
-            subj["Paho MQTTv5 subscriber\ntopic: .../compartment/opened\nlogs message"]
-        end
-
-        subgraph pubstd["mqtt-publisher (container, optional test)"]
-            pubj["Paho MQTTv5 publisher\nfires one CompartmentOpenedEventMsg on start"]
-        end
-
-        gen -->|writes certs + P12| certs
-        certs -. mount read-only .- mos
-        certs -. mount read-only .- rs
-        certs -. mount read-only .- rc
-        certs -. mount read-only .- subj
-        certs -. mount read-only .- pubj
-
-        rc -- "HTTPS mTLS\nopenCompartment" --> rs
-        rs --> emit
-        emit -- "MQTT TLS mTLS\nQoS 1" --> mos
-        pubj -- "MQTT TLS mTLS\nQoS 1" --> mos
-        mos -- "MQTT TLS mTLS\ndeliver" --> subj
-    end
-
-    classDef vol fill:#eef,stroke:#446,stroke-dasharray: 4 2;
-```
-
-### End-to-end happy path
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant C as rest-client
-    participant S as rest-server
-    participant B as mosquitto (TLS 8883)
-    participant U as mqtt-subscriber
-
-    C->>S: HTTPS POST /api/v010/locker/{lockerId}/compartment/{compartmentId}/open<br/>(mTLS, headers: Client-Version, Lock-Token, Idempotency-Key)
-    S->>S: log command, validate path params
-    S-->>C: 200 OK (empty body)
-    S->>B: MQTT PUBLISH topic=psfusion/business-event/v010/compartment/opened<br/>payload=CompartmentOpenedEventMsg (JSON)
-    B->>U: MQTT deliver (QoS 1)
-    U->>U: log received event
-```
+Generated certificates are written to `certs/`, which is git-ignored.
 
 ---
 
