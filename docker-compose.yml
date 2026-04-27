@@ -35,7 +35,10 @@ services:
   rest-server:
     build:
       context: .
-      dockerfile: rest-server/Dockerfile
+      dockerfile: Dockerfile.java-service
+      args:
+        MODULE: rest-server
+        INSTALL_CURL: "true"
     depends_on:
       cert-init:
         condition: service_completed_successfully
@@ -68,7 +71,9 @@ services:
   mqtt-subscriber:
     build:
       context: .
-      dockerfile: mqtt-subscriber/Dockerfile
+      dockerfile: Dockerfile.java-service
+      args:
+        MODULE: mqtt-subscriber
     depends_on:
       cert-init:
         condition: service_completed_successfully
@@ -97,7 +102,9 @@ services:
   rest-client:
     build:
       context: .
-      dockerfile: rest-client/Dockerfile
+      dockerfile: Dockerfile.java-service
+      args:
+        MODULE: rest-client
     depends_on:
       rest-server:
         condition: service_healthy
@@ -122,7 +129,9 @@ services:
   mqtt-publisher:
     build:
       context: .
-      dockerfile: mqtt-publisher/Dockerfile
+      dockerfile: Dockerfile.java-service
+      args:
+        MODULE: mqtt-publisher
     depends_on:
       mosquitto:
         condition: service_healthy
@@ -147,7 +156,9 @@ services:
   integration-test:
     build:
       context: .
-      dockerfile: integration-test/Dockerfile
+      dockerfile: Dockerfile.java-service
+      args:
+        MODULE: integration-test
     depends_on:
       rest-server:
         condition: service_healthy
