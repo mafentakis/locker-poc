@@ -33,7 +33,7 @@ Minimal **Java 21** Proof-of-Concept demonstrating secure, framework-free commun
 | JSON               | Jackson `jackson-databind`                                 |
 | Logging            | `java.util.logging` (JUL) + `logging.properties`           |
 | TLS trust model    | **mTLS everywhere**, one self-signed CA signs all certs    |
-| Cert generation    | `openssl` via `scripts/gen-certs.sh` (one-shot init)       |
+| Cert generation    | Docker Compose `cert-init` runs `scripts/gen-certs.sh`     |
 | Orchestration      | Docker Compose (Unix)                                      |
 
 ---
@@ -57,28 +57,23 @@ locker-poc/
 └── SPEC.md
 ```
 
-Generated certificates are written to `certs/`, which is git-ignored.
+Generated certificates are written by the `cert-init` container to `certs/`, which is git-ignored.
 
 ---
 
-## Quick start (after implementation)
-
-> These commands are the **target** flow defined by the SPEC. No files exist yet.
+## Quick start
 
 ```bash
-# 1. Generate self-signed CA + leaf certs (idempotent)
-./scripts/gen-certs.sh
-
-# 2. Build all Java modules and Docker images
+# 1. Build all Java modules and Docker images
 docker compose build
 
-# 3. Start broker + server + subscriber; run client once
+# 2. Start the stack. cert-init generates certificates inside Docker first.
 docker compose up
 
-# 4. Observe logs
+# 3. Observe logs
 docker compose logs -f rest-server mqtt-subscriber
 
-# 5. Run the end-to-end integration test (spins the stack up/down itself)
+# 4. Run the end-to-end integration test (spins the stack up/down itself)
 mvn -pl integration-test -am verify
 ```
 
@@ -89,14 +84,6 @@ Every long-running container (`mosquitto`, `rest-server`, `mqtt-subscriber`) exp
 ### Integration test
 
 Module `integration-test/` (JUnit 5, test scope only — no framework in production code) boots the full stack via `docker compose`, waits for all healthchecks, runs black-box checks over HTTPS + MQTT using the generated certificates, then tears the stack down. See **SPEC §10**.
-
----
-
-## Documentation
-
-- [`SPEC.md`](./SPEC.md) — full technical specification (architecture, message contracts, TLS details, container/port matrix, build/run, acceptance criteria).
-- `DeliveryMachineBusinessFunction.Open-API-en.yaml` — source of the `openCompartment` REST contract.
-- `DeliveryMachineBusinessEvent.Open-API-en.yaml` — source of the `CompartmentOpenedEventMsg` event contract.
 
 ---
 
