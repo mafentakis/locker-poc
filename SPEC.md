@@ -2,7 +2,7 @@
 # Locker PoC — Technical Specification
 
 **Version:** 0.1 (spec only, no implementation)
-**Date:** 2026-04-24
+**Date:** 2026-04-27
 **Owner:** locker-poc
 **Status:** Draft, locked for implementation
 
@@ -257,6 +257,7 @@ ACL is **not** configured in the PoC; `use_identity_as_username true` is documen
   - `rest-client`
   - `mqtt-publisher`
   - `mqtt-subscriber`
+  - `integration-test`
 - Java 21 (`maven.compiler.release=21`).
 - Each executable module uses `maven-shade-plugin` to produce a single runnable JAR `app.jar` with `Main-Class` set.
 
@@ -272,15 +273,22 @@ No other runtime dependencies. No SLF4J (JUL is the single logger).
 
 ### 6.3 Dockerfiles
 
-- **Multi-stage**: stage 1 `maven:3.9-eclipse-temurin-21` runs `mvn -pl <module> -am package -DskipTests`; stage 2 `eclipse-temurin:21-jre` copies `target/app.jar` and sets `ENTRYPOINT ["java","-jar","/app/app.jar"]`.
-- Build context is the repo root so all modules are visible.
-- A shared base Dockerfile is not used; each service has its own thin Dockerfile referencing the same pattern.
+- `cert-init` keeps its own Dockerfile because it has a separate certificate-generation purpose.
+- All Java service images use the shared root-level `Dockerfile.java-service`.
+- The shared Dockerfile is parameterized by build args:
+  - `MODULE` - required; one of `rest-server`, `rest-client`, `mqtt-publisher`, `mqtt-subscriber`, `integration-test`.
+  - `INSTALL_CURL` - optional, default `false`; set to `true` only for `rest-server` so its Docker healthcheck can call `/health`.
+- **Multi-stage**:
+  - stage 1 `maven:3.9-eclipse-temurin-21` copies `common/`, installs it with `mvn -f common/pom.xml install -DskipTests -q`, then copies `${MODULE}/` and runs `mvn -f ${MODULE}/pom.xml package -DskipTests -q`.
+  - stage 2 `eclipse-temurin:21-jre` conditionally installs `curl` when `INSTALL_CURL=true`, copies `/src/${MODULE}/target/app.jar` to `/app/app.jar`, and sets `ENTRYPOINT ["java","-jar","/app/app.jar"]`.
+- Build context is the repo root so `common` and the selected module are visible.
 
 ### 6.4 `docker-compose.yml`
 
 - Defines the 6 services from §5.
 - One named network `locker-net`.
 - One bind mount `./certs` shared across cert-init + all services.
+- Java services build with `dockerfile: Dockerfile.java-service` and a service-specific `MODULE` build arg. `rest-server` also passes `INSTALL_CURL=true`.
 - **Every container has a healthcheck** — see §6.5.
 - `depends_on` uses `condition: service_healthy` (not just `service_started`) wherever possible, so e.g. `rest-client` waits until `rest-server` is actually serving TLS.
 
@@ -441,7 +449,7 @@ The `integration-test` module is safe to run in any environment where Docker + D
 The PoC is considered complete when **all** of the following hold on a fresh checkout on a Unix host with Docker:
 
 1. `./scripts/gen-certs.sh` runs from an empty state and produces, in `./certs/`: `ca.crt`, `ca.key`, and for each of `{broker, rest-server, rest-client, mqtt-publisher, mqtt-subscriber}`: `<svc>.crt`, `<svc>.key`, `<svc>-keystore.p12`, plus a single `truststore.p12`.
-2. `docker compose build` succeeds with no warnings about missing files.
+2. `docker compose build` succeeds with no warnings about missing files; all Java service images build from `Dockerfile.java-service`.
 3. `docker compose up` brings up `cert-init` (exits 0), then `mosquitto`, `rest-server`, `mqtt-subscriber` reach **healthy** state per §6.5, then `rest-client` and `mqtt-publisher` run once, mark themselves done, and exit 0.
 4. `docker compose ps` shows every long-running service as `healthy` and every one-shot service as `exited (0)`.
 5. `docker compose logs rest-server` contains exactly one `Received openCompartment ...` line and one `Published CompartmentOpenedEventMsg ...` line per client run.
@@ -479,7 +487,7 @@ The PoC is considered complete when **all** of the following hold on a fresh che
 6. `rest-server` HTTPS handler + `GET /health` + healthcheck → confirm mTLS with `curl --cert`, healthcheck passes.
 7. `rest-server` MQTT publish wired into `openCompartment` handler → confirm subscriber logs the REST-triggered event.
 8. `rest-client` (writes `/tmp/rest-client.done` on 200 response) → confirm full end-to-end via `docker compose up`.
-9. `docker-compose.yml` final wiring: `depends_on` conditions (`service_healthy`, `service_completed_successfully`), all 6 healthcheck blocks per §6.5.
+9. `docker-compose.yml` final wiring: shared Java service Dockerfile build args, `depends_on` conditions (`service_healthy`, `service_completed_successfully`), all 6 healthcheck blocks per §6.5.
 10. `integration-test` module (§10) → `mvn -pl integration-test -am verify` passes on a clean host.
 11. README quick-start verification on a clean host.
 

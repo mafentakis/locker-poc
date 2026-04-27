@@ -2,10 +2,6 @@
 
 Minimal **Java 21** Proof-of-Concept demonstrating secure, framework-free communication between a REST client, a REST server, and an MQTT publish/subscribe pair — all running as Docker containers orchestrated via Docker Compose, secured with self-signed mTLS certificates.
 
-> **Status:** specification phase. See [`SPEC.md`](./SPEC.md) for the authoritative technical spec. No implementation code yet.
-
----
-
 ## Goals
 
 - Show an end-to-end, secure flow:
@@ -26,19 +22,19 @@ Minimal **Java 21** Proof-of-Concept demonstrating secure, framework-free commun
 
 ## Stack (locked choices)
 
-| Concern              | Choice                                                |
-| -------------------- | ----------------------------------------------------- |
-| Language / runtime   | Java 21 (Temurin JRE in runtime images)               |
-| Build                | Maven multi-module                                    |
-| HTTPS server         | JDK `com.sun.net.httpserver.HttpsServer`              |
-| HTTPS client         | JDK `java.net.http.HttpClient`                        |
-| MQTT client          | Eclipse Paho **MQTTv5** (`org.eclipse.paho.mqttv5.client`) |
-| MQTT broker          | Eclipse Mosquitto 2.x                                 |
-| JSON                 | Jackson `jackson-databind`                            |
-| Logging              | `java.util.logging` (JUL) + `logging.properties`      |
-| TLS trust model      | **mTLS everywhere**, one self-signed CA signs all certs |
-| Cert generation      | `openssl` via `scripts/gen-certs.sh` (one-shot init)  |
-| Orchestration        | Docker Compose (Unix)                                 |
+| Concern            | Choice                                                     |
+| ------------------ | ---------------------------------------------------------- |
+| Language / runtime | Java 21 (Temurin JRE in runtime images)                    |
+| Build              | Maven multi-module                                         |
+| HTTPS server       | JDK `com.sun.net.httpserver.HttpsServer`                   |
+| HTTPS client       | JDK `java.net.http.HttpClient`                             |
+| MQTT client        | Eclipse Paho **MQTTv5** (`org.eclipse.paho.mqttv5.client`) |
+| MQTT broker        | Eclipse Mosquitto 2.x                                      |
+| JSON               | Jackson `jackson-databind`                                 |
+| Logging            | `java.util.logging` (JUL) + `logging.properties`           |
+| TLS trust model    | **mTLS everywhere**, one self-signed CA signs all certs    |
+| Cert generation    | `openssl` via `scripts/gen-certs.sh` (one-shot init)       |
+| Orchestration      | Docker Compose (Unix)                                      |
 
 ---
 
